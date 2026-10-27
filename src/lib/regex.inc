@@ -687,7 +687,7 @@ static void init_natives(void) {
   MF(m, "اقرا", f_read, 1, 1); MF(m, "اكتب", f_write, 2, 2); MF(m, "الحق", f_append, 2, 2); MF(m, "موجود", f_exists, 1, 1);
   MF(m, "احذف", f_remove, 1, 1); MF(m, "حجم", f_size, 1, 1); MF(m, "هل_مجلد", f_isdir, 1, 1); MF(m, "مسار_مطلق", f_abs, 1, 1); MF(m, "انقل", f_move, 2, 2); MF(m, "انسخ", f_copy, 2, 2); MF(m, "سطور", f_lines, 1, 1); MF(m, "مسار_البيت", f_home, 0, 0); MF(m, "احذف_مجلد", f_rmdir, 1, 1); MF(m, "انشئ_مجلدات", f_mkdirs, 1, 1); MF(m, "احذف_شجرة", f_rmtree, 1, 1); MF(m, "هل_رابط", f_islink, 1, 1); MF(m, "انشئ_مجلد", f_mkdir, 1, 1); MF(m, "قائمة", f_list, 1, 1);
   m = mkmod("جيسون"); MF(m, "ترميز", j_enc, 1, 2); MF(m, "فك", j_dec, 1, 1);
-  m = mkmod("شبكة"); MF(m, "جلب", net_fetch, 1, 2); MF(m, "خادم", net_serve, 2, 3); MF(m, "اقرا_طلب", net_readreq, 2, 2); MF(m, "اكتب_رد", net_writeresp, 2, 2); MF(m, "ترميز_رابط", net_urlenc, 1, 1); MF(m, "فك_رابط", net_urldec, 1, 1);
+  m = mkmod("شبكة"); MF(m, "جلب", net_fetch, 1, 2); MF(m, "جلب_متدفق", net_fetch_stream, 2, 3); MF(m, "خادم", net_serve, 2, 3); MF(m, "اقرا_طلب", net_readreq, 2, 2); MF(m, "اكتب_رد", net_writeresp, 2, 2); MF(m, "ترميز_رابط", net_urlenc, 1, 1); MF(m, "فك_رابط", net_urldec, 1, 1);
   m = mkmod("سوكت");
   MF(m, "اتصل", sk_connect, 2, 3); MF(m, "استمع", sk_listen, 1, 2); MF(m, "اقبل", sk_accept, 1, 1); MF(m, "ارسل", sk_send, 2, 2);
   MF(m, "استقبل", sk_recv, 1, 2); MF(m, "بالضبط", sk_exact, 2, 2); MF(m, "سطر", sk_line, 1, 1); MF(m, "اغلق", sk_close, 1, 1);
