@@ -75,7 +75,63 @@ static bool read_body(int fd, Map *hm, bool nobody, Buf *body) {
   }
 }
 
-static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value *res) {
+static bool http_stream_emit(Value callback, const char *data, int n, bool *callback_failed) {
+  if (n <= 0) return true;
+  Value arg = mkstr(data, n), out; Value *saved = vm.sp; push(arg);
+  bool ok = call_fn(callback, 1, &arg, &out);
+  vm.sp = saved;
+  if (!ok) { *callback_failed = true; return false; }
+  return true;
+}
+
+static bool read_stream_payload(int fd, long remaining, Value callback, bool collect, Buf *body, long *total, bool *callback_failed) {
+  bool until_eof = remaining < 0;
+  while (until_eof || remaining > 0) {
+    Buf *b = &rbuf[fd];
+    if (b->n == 0) {
+      int r = rb_fill(fd);
+      if (r == 0) return until_eof;
+      if (r < 0) return false;
+      b = &rbuf[fd];
+    }
+    int n = b->n > 16384 ? 16384 : b->n;
+    if (!until_eof && (long)n > remaining) n = (int)remaining;
+    if (n <= 0 || *total + n > (256L << 20)) return false;
+    char piece[16384]; memcpy(piece, b->p, (size_t)n); rb_consume(fd, n);
+    *total += n;
+    if (collect) buf_add(body, piece, n);
+    if (!http_stream_emit(callback, piece, n, callback_failed)) return false;
+    if (!until_eof) remaining -= n;
+  }
+  return true;
+}
+
+static bool read_body_stream(int fd, Map *hm, bool nobody, Value callback, bool collect, Buf *body, bool *callback_failed) {
+  if (nobody) return true;
+  Str *te, *cl; long total = 0;
+  if (hget(hm, "transfer-encoding", &te) && strcasestr(te->chars, "chunked")) {
+    for (;;) {
+      Buf ln; buf_init(&ln); int r = rb_getline(fd, &ln);
+      if (r <= 0) { free(ln.p); return false; }
+      long sz = strtol(buf_cstr(&ln), NULL, 16); free(ln.p);
+      if (sz == 0) {
+        for (;;) { Buf t; buf_init(&t); int q = rb_getline(fd, &t); int e = t.n; free(t.p); if (q <= 0 || e == 0) break; }
+        return true;
+      }
+      if (sz < 0 || total + sz > (256L << 20)) return false;
+      if (!read_stream_payload(fd, sz, callback, collect, body, &total, callback_failed)) return false;
+      Buf crlf; buf_init(&crlf); int q = rb_getline(fd, &crlf); free(crlf.p); if (q <= 0) return false;
+    }
+  }
+  if (hget(hm, "content-length", &cl)) {
+    long n = atol(cl->chars); if (n < 0 || n > (256L << 20)) return false;
+    return n == 0 || read_stream_payload(fd, n, callback, collect, body, &total, callback_failed);
+  }
+  return read_stream_payload(fd, -1, callback, collect, body, &total, callback_failed);
+}
+
+static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value callback, bool collect_stream_body, Value *res) {
+  bool streaming = !IS_NIL(callback);
   char method[16]; snprintf(method, sizeof method, "%s", method0); char url[4096]; snprintf(url, sizeof url, "%s", url0); Str *body = body0;
   for (int hop = 0;; hop++) {
     Url u; if (!parse_url(url, &u) || (strcmp(u.scheme, "http") && strcmp(u.scheme, "https"))) { rt_error("رابط غير صالح: %s", url); return 1; }
@@ -85,7 +141,9 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
     tmo_ms[fd] = tmo;
     Buf rq; buf_init(&rq); buf_fmt(&rq, "%s %s HTTP/1.1\r\nHost: %s", method, u.path, u.host);
     if ((u.tls && u.port != 443) || (!u.tls && u.port != 80)) buf_fmt(&rq, ":%d", u.port);
-    buf_fmt(&rq, "\r\nConnection: close\r\nAccept-Encoding: %s\r\n", z_load() ? "gzip" : "identity");
+    buf_fmt(&rq, "\r\nConnection: close\r\n");
+    if (streaming) { if (!dict_has_ci(hdrs, "accept-encoding")) buf_fmt(&rq, "Accept-Encoding: identity\r\n"); }
+    else buf_fmt(&rq, "Accept-Encoding: %s\r\n", z_load() ? "gzip" : "identity");
     if (!dict_has_ci(hdrs, "user-agent")) buf_fmt(&rq, "User-Agent: solan/%s\r\n", SOLAN_VERSION);
     if (!dict_has_ci(hdrs, "accept")) buf_fmt(&rq, "Accept: */*\r\n");
     add_user_headers(&rq, hdrs);
@@ -102,12 +160,19 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
     free(st.p); if (!code) { conn_close(fd); rt_error("رد HTTP غير صالح"); return 1; }
     Map *hm = new_map(); push(OBJV(hm));
     if (!read_headers(fd, hm)) { vm.sp--; conn_close(fd); rt_error("فشل قراءة رؤوس الرد"); return 1; }
-    Buf bd; buf_init(&bd); bool ok = read_body(fd, hm, !strcmp(method, "HEAD") || code == 204 || code == 304 || code < 200, &bd);
+    Str *loc = NULL;
+    bool redirect = (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) && hop < maxredir && hget(hm, "location", &loc);
+    Buf bd; buf_init(&bd); bool callback_failed = false;
+    bool no_body = !strcmp(method, "HEAD") || code == 204 || code == 304 || code < 200;
+    bool ok = streaming && !redirect
+      ? read_body_stream(fd, hm, no_body, callback, collect_stream_body, &bd, &callback_failed)
+      : read_body(fd, hm, no_body, &bd);
     conn_close(fd);
     { Str *ce; if (ok && bd.n > 0 && hget(hm, "content-encoding", &ce) && (strcasestr(ce->chars, "gzip") || strcasestr(ce->chars, "deflate"))) { Buf dec; buf_init(&dec); if (z_inflate(bd.p, bd.n, &dec, 47)) { free(bd.p); bd = dec; } else free(dec.p); } }
+    if (callback_failed) { vm.sp--; free(bd.p); return 1; }
+    if (streaming && !ok) { vm.sp--; free(bd.p); rt_error("فشل قراءة جسم الرد المتدفق (انتهت المهلة؟)"); return 1; }
     if (!ok && bd.n == 0) { vm.sp--; free(bd.p); rt_error("فشل قراءة جسم الرد (انتهت المهلة؟)"); return 1; }
-    Str *loc;
-    if ((code == 301 || code == 302 || code == 303 || code == 307 || code == 308) && hop < maxredir && hget(hm, "location", &loc)) {
+    if (redirect) {
       char nu[4096];
       if (strstr(loc->chars, "://")) snprintf(nu, sizeof nu, "%s", loc->chars);
       else if (loc->chars[0] == '/') snprintf(nu, sizeof nu, "%s://%s:%d%s", u.scheme, u.host, u.port, loc->chars);
@@ -171,9 +236,44 @@ NAT(net_fetch) {
     dset(&hm2->d, mkstr("Content-Type", 12), mkstr(ct, (int)strlen(ct))); body = intern(buf_cstr(&mp), mp.n); free(mp.p); h = OBJV(hm2);
   } else if (!IS_NIL(b)) { if (IS_T(b, O_MAP) || IS_T(b, O_LIST)) { Buf jb; buf_init(&jb); json_enc(b, &jb, 0, 0); body = intern(buf_cstr(&jb), jb.n); free(jb.p); js = true; } else body = tostr(b); }
   push(body ? OBJV(body) : NIL);
-  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, res);
+  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, NIL, false, res);
   vm.sp--; if (hm2) vm.sp--;
   if (r == 2) return net_fetch_curl(argc, a, res);
+  return r == 0;
+}
+
+NAT(net_fetch_stream) {
+  PERM(PM_NET); STRA(0);
+  if (argc < 2 || !(IS_T(a[1], O_CLO) || IS_T(a[1], O_NAT) || IS_T(a[1], O_BOUND))) FAIL("جلب_متدفق يحتاج دالة callback كوسيط ثانٍ");
+  Value callback = a[1];
+  Value m = optv(argc, a, 2, "طريقة"), h = optv(argc, a, 2, "رؤوس"), b = optv(argc, a, 2, "جسم");
+  Value tm = optv(argc, a, 2, "مهلة"), vf = optv(argc, a, 2, "تحقق"), rd = optv(argc, a, 2, "تحويلات");
+  Value fm = optv(argc, a, 2, "نموذج"), fu = optv(argc, a, 2, "نموذج_رابط"), collect_v = optv(argc, a, 2, "اجمع_الجسم");
+  bool collect = !IS_NIL(collect_v) && !falsey(collect_v);
+  char method[16] = "GET";
+  if (IS_T(m, O_STR)) { snprintf(method, sizeof method, "%s", AS_STR(m)->chars); for (char *c = method; *c; c++) *c = (char)toupper((unsigned char)*c); }
+  else if (!IS_NIL(b) || IS_T(fm, O_MAP) || IS_T(fu, O_MAP)) snprintf(method, sizeof method, "POST");
+  Str *body = NULL; bool js = false; Map *hm2 = NULL;
+  if (IS_T(fm, O_MAP) || IS_T(fu, O_MAP)) {
+    hm2 = new_map(); push(OBJV(hm2));
+    if (IS_T(h, O_MAP)) { Dict *hd = &AS_MAP(h)->d; for (int i = 0; i < hd->n; i++) if (hd->e[i].k.t != V_EMPTY) dset(&hm2->d, hd->e[i].k, hd->e[i].v); }
+    Buf mp; buf_init(&mp); char ct[200];
+    if (IS_T(fm, O_MAP)) {
+      char bd[64]; if (!build_multipart(&AS_MAP(fm)->d, &mp, bd, sizeof bd)) { free(mp.p); vm.sp--; return false; }
+      snprintf(ct, sizeof ct, "multipart/form-data; boundary=%s", bd);
+    } else {
+      Dict *fd = &AS_MAP(fu)->d; bool first = true;
+      for (int i = 0; i < fd->n; i++) { if (fd->e[i].k.t == V_EMPTY) continue; Str *k = tostr(fd->e[i].k), *v = tostr(fd->e[i].v); if (!first) buf_addc(&mp, '&'); first = false; url_encode(k->chars, k->len, &mp); buf_addc(&mp, '='); url_encode(v->chars, v->len, &mp); }
+      snprintf(ct, sizeof ct, "application/x-www-form-urlencoded");
+    }
+    dset(&hm2->d, mkstr("Content-Type", 12), mkstr(ct, (int)strlen(ct))); body = intern(buf_cstr(&mp), mp.n); free(mp.p); h = OBJV(hm2);
+  } else if (!IS_NIL(b)) { if (IS_T(b, O_MAP) || IS_T(b, O_LIST)) { Buf jb; buf_init(&jb); json_enc(b, &jb, 0, 0); body = intern(buf_cstr(&jb), jb.n); free(jb.p); js = true; } else body = tostr(b); }
+  push(body ? OBJV(body) : NIL);
+  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js,
+    IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5,
+    callback, collect, res);
+  vm.sp--; if (hm2) vm.sp--;
+  if (r == 2) FAIL("جلب_متدفق عبر HTTPS يحتاج OpenSSL 3 وقت التشغيل؛ لا يستخدم fallback مجمّعاً كي لا يفقد التدفق الحي");
   return r == 0;
 }
 
