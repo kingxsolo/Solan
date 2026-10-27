@@ -1,0 +1,178 @@
+{
+  "name": "solan-lang",
+  "displayName": "Solan — سولان",
+  "description": "دعم لغة سولان العربية: تلوين وقصاصات وأقواس",
+  "version": "1.0.0",
+  "publisher": "solan",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "solan",
+        "aliases": [
+          "Solan",
+          "سولان"
+        ],
+        "extensions": [
+          ".سو",
+          ".an",
+          ".solan"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "solan",
+        "scopeName": "source.solan",
+        "path": "./syntaxes/solan.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "solan",
+        "path": "./snippets/solan.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[solan]": {
+        "editor.tokenColorCustomizations": {
+          "textMateRules": [
+            {
+              "scope": "comment.line.solan",
+              "settings": {
+                "foreground": "#808080",
+                "fontStyle": "italic"
+              }
+            },
+            {
+              "scope": "comment.block.solan",
+              "settings": {
+                "foreground": "#808080",
+                "fontStyle": "italic"
+              }
+            },
+            {
+              "scope": "string.quoted",
+              "settings": {
+                "foreground": "#87d787"
+              }
+            },
+            {
+              "scope": "constant.numeric.solan",
+              "settings": {
+                "foreground": "#ff875f"
+              }
+            },
+            {
+              "scope": "keyword.control.solan",
+              "settings": {
+                "foreground": "#af87ff",
+                "fontStyle": "bold"
+              }
+            },
+            {
+              "scope": "storage.type.solan",
+              "settings": {
+                "foreground": "#5fafff",
+                "fontStyle": "bold"
+              }
+            },
+            {
+              "scope": "constant.language.solan",
+              "settings": {
+                "foreground": "#ffaf5f"
+              }
+            },
+            {
+              "scope": "variable.language.solan",
+              "settings": {
+                "foreground": "#d7afff",
+                "fontStyle": "italic"
+              }
+            },
+            {
+              "scope": "keyword.operator.word.solan",
+              "settings": {
+                "foreground": "#d787d7"
+              }
+            },
+            {
+              "scope": "keyword.control.import.solan",
+              "settings": {
+                "foreground": "#af87af"
+              }
+            },
+            {
+              "scope": "support.class.module.solan",
+              "settings": {
+                "foreground": "#5fd7af",
+                "fontStyle": "bold"
+              }
+            },
+            {
+              "scope": "support.function.builtin.solan",
+              "settings": {
+                "foreground": "#5fd7d7"
+              }
+            },
+            {
+              "scope": "entity.name.class.solan",
+              "settings": {
+                "foreground": "#ffd75f",
+                "fontStyle": "bold underline"
+              }
+            },
+            {
+              "scope": "entity.name.function.call.solan",
+              "settings": {
+                "foreground": "#ffd787"
+              }
+            },
+            {
+              "scope": "meta.embedded.solan",
+              "settings": {
+                "foreground": "#ffaf87"
+              }
+            },
+            {
+              "scope": "keyword.operator.solan",
+              "settings": {
+                "foreground": "#8a8a8a"
+              }
+            }
+          ]
+        },
+        "editor.semanticHighlighting.enabled": false,
+        "editor.wordBasedSuggestions": "off",
+        "editor.bracketPairColorization.enabled": true,
+        "editor.detectIndentation": false,
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      }
+    },
+    "configuration": {
+      "title": "Solan",
+      "properties": {
+        "solan.path": {
+          "type": "string",
+          "default": "solan",
+          "description": "مسار الملف التنفيذي solan (يُشغَّل بـ lsp)"
+        }
+      }
+    }
+  },
+  "main": "./extension.js",
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "activationEvents": [
+    "onLanguage:solan"
+  ]
+}

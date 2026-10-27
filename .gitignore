@@ -1,0 +1,18 @@
+# Build outputs
+/solan
+/solan.exe
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+third_party/sqlite/*.o
+
+# Local state and temporary files
+.solan/
+*.swp
+*.swo
+.DS_Store
+
+# Editor settings
+.vscode/settings.json
