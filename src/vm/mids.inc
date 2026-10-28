@@ -5,8 +5,8 @@
   X(M_INSERT, "ادرج") X(M_REMOVE, "احذف") X(M_POP, "اسحب") X(M_JOIN, "ادمج") X(M_SORT, "رتب") \
   X(M_MAP, "حول") X(M_FILTER, "رشح") X(M_REDUCE, "اطوي") X(M_EACH, "نفذ") X(M_COPY, "انسخ") \
   X(M_CLEAR, "امسح") X(M_SUM, "مجموع") X(M_KEYS, "مفاتيح") X(M_VALUES, "قيم") X(M_ITEMS, "ازواج") \
-  X(M_MERGE, "دمج") X(M_FINDF, "جد") X(M_ANY, "اي") X(M_ALL, "كل") X(M_LINES, "سطور") X(M_PADL, "املأ_يمين") \
-  X(M_PADR, "املأ_يسار") X(M_FORMAT, "نسق") \
+  X(M_MERGE, "دمج") X(M_FINDF, "جد") X(M_ANY, "اي") X(M_ALL, "كل") X(M_LINES, "سطور") X(M_PADL, "املأ_يسار") \
+  X(M_PADR, "املأ_يمين") X(M_FORMAT, "نسق") \
   X(M_UNIQUE, "فريد") X(M_FLATTEN, "سطّح") X(M_FIRST, "اول") X(M_LAST, "اخر") X(M_GET, "احصل")
 #define X_ENUM(id, s) id,
 enum { METHODS(X_ENUM) M_COUNT };
