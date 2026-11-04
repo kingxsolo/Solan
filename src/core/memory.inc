@@ -39,6 +39,7 @@ static Obj *newobj(size_t sz, OT t) {
 
 static void buf_init(Buf *b) { b->p = NULL; b->n = b->cap = 0; }
 static void buf_add(Buf *b, const char *s, int n) {
+  if (n < 0) return; /* دفاع: طول سالب (بيانات فاسدة) — تجاهل بدل سلوك غير معرّف */
   if (b->n + n + 1 > b->cap) {
     int nc = b->cap ? b->cap * 2 : 64;
     while (nc < b->n + n + 1) nc *= 2;

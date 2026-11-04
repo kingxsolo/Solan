@@ -125,6 +125,8 @@ static int jc_effect(JC *c, JI *in, int *pop, int *push) {
     case OP_BAND: case OP_BOR: case OP_BXOR: case OP_SHL: case OP_SHR: *pop = 1; return 1;
     case OP_SET_INDEX: *pop = 2; return 1;
     case OP_FOREACH: *push = in->b; return 1;
+    case OP_RFOREP: *pop = 0; return 1;
+    case OP_RFOR: *push = in->c; return 1;
     default: (void)c; return 0;
   }
 }
@@ -146,6 +148,8 @@ static int jc_analyze(JC *c) {
       case OP_JUMP: case OP_JIF: case OP_JIT: case OP_JNN: case OP_JNIL: in->tip = ip + 3 + ((ar[0] << 8) | ar[1]); break;
       case OP_LOOP: in->tip = ip + 3 - ((ar[0] << 8) | ar[1]); break;
       case OP_FOREACH: in->a = ar[0]; in->b = ar[1]; in->tip = ip + 5 + ((ar[2] << 8) | ar[3]); break;
+      case OP_RFOREP: in->a = ar[0]; in->b = ar[1]; in->c = ar[2]; break;
+      case OP_RFOR: in->a = ar[0]; in->b = ar[1]; in->c = ar[2]; in->tip = ip + 6 + ((ar[3] << 8) | ar[4]); break;
       default: break;
     }
     int pop, push;
@@ -548,6 +552,7 @@ static void jc_promote(JC *c) {
         case OP_GET_INDEX: ty[d - 2] = 0; break;
         case OP_SET_INDEX: ty[d - 3] = ty[d - 1]; break;
         case OP_FOREACH: for (int k = 0; k < in->b; k++) ty[d + k] = 0; break;
+        case OP_RFOR: for (int k = 0; k < in->c; k++) ty[d + k] = 1; break; /* قيم المدى أرقام دائماً */
         case OP_CHECK: if (in->a & TY_NUM) ty[d - 1] = 1; break;
         default: break;
       }
@@ -784,6 +789,28 @@ static void jc_gen_body(JC *c) {
         for (int k = 0; k < nv; k++) { jx_movsd_mr(x, R12, (d + k) * 16 + 8, 3); jc_settag(c, d + k, V_NUM); }
         jc_bind(c, done);
         for (int k = 0; k < nv; k++) c->sd[d + k] = sd_mk(SK_MEM);
+        break;
+      }
+      case OP_RFOR: {
+        /* حلقة المدى المتخصصة: عدّاد صحيح من 0 حتى العدد، القيمة = أ + العدّاد — بلا فحوص نوع */
+        jc_canon(c, 0, d);
+        int base = in->a, flag = in->b, nvr = in->c;
+        int coff = flag ? 40 : 24, loff = flag ? 24 : 8; /* بايت: داخل كل سلوت 16 بايت الوسم عند +0 والعدد عند +8 */
+        int ex = jc_jump_label(c, in, d, 0);
+        jx_movsd_rm(x, 3, RBX, base * 16 + coff);                                  /* XMM3 = العدّاد */
+        jx_rm(x, 0x66, 0, 0x0F2E, 3, RBX, -1, 0, base * 16 + loff);                /* ucomisd العدّاد، العدد */
+        jc_jcc(c, CC_AE, ex);                                                      /* انتهى → خروج (NaN مستحيل: RFOREP يصفّر العدد) */
+        jx_mov_ri(x, RAX, 0x3FF0000000000000ull); jx_movq_xr(x, 2, RAX);           /* XMM2 = 1.0 */
+        jx_movaps(x, 4, 3); jx_addsd(x, 4, 2); jx_movsd_mr(x, RBX, base * 16 + coff, 4); /* العدّاد += 1 (في XMM4) */
+        int vx = 3;                                                                 /* سجل القيمة = العدّاد (flag=0) */
+        if (flag) { jx_movsd_rm(x, 4, RBX, base * 16 + 8); jx_addsd(x, 4, 3); vx = 4; } /* القيمة = أ + العدّاد (بالعدّاد القديم) */
+        if (nvr == 2) {
+          jx_movsd_mr(x, R12, d * 16 + 8, 3); jc_settag(c, d, V_NUM);              /* ي = الفهرس = العدّاد */
+          jx_movsd_mr(x, R12, (d + 1) * 16 + 8, vx); jc_settag(c, d + 1, V_NUM);   /* ت = القيمة */
+        } else {
+          jx_movsd_mr(x, R12, d * 16 + 8, vx); jc_settag(c, d, V_NUM);             /* ي = القيمة */
+        }
+        for (int k = 0; k < nvr; k++) c->sd[d + k] = sd_mk(SK_MEM);
         break;
       }
       default: c->failed = 1; c->why = "op"; break;

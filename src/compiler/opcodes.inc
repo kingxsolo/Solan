@@ -52,6 +52,8 @@
   X(OP_MAP) \
   X(OP_ITERPREP) \
   X(OP_FOREACH) \
+  X(OP_RFOREP) \
+  X(OP_RFOR) \
   X(OP_TRY) \
   X(OP_ENDTRY) \
   X(OP_THROW) \
@@ -198,6 +200,8 @@ static int op_operand_len(const Fun *f, const uint8_t *ip) {
     case OP_CHECK: return 4;
     case OP_JNE_EMPTY: case OP_INVOKE: case OP_SUPER_INVOKE: return 3;
     case OP_FOREACH: return 4;
+    case OP_RFOREP: return 3;
+    case OP_RFOR: return 5;
     case OP_CLOSURE: {
       int ci = (ip[1] << 8) | ip[2]; Value c = f->ch.consts.v[ci];
       return 2 + 2 * (IS_T(c, O_FUN) ? AS_FUN(c)->upc : 0);

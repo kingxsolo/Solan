@@ -638,11 +638,11 @@ NAT(s_symbols) {
   for (int i = 0; STDLIB[i].name; i++) varr_push(&sl->a, mkstr(STDLIB[i].name, (int)strlen(STDLIB[i].name)));
   vm.sp--; *res = OBJV(r); return true;
 }
-NAT(s_waitpid) { NUMA(0); int st = 0;
+NAT(s_waitpid) { NUMA(0);
 #if !SOLAN_FORK
   FAIL("waitpid غير متاحة على هذا النظام");
 #else
-  pid_t r = waitpid((pid_t)a[0].as.n, &st, 0); *res = NUMV(r < 0 ? -1 : (WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st))); return true;
+  int st = 0; pid_t r = waitpid((pid_t)a[0].as.n, &st, 0); *res = NUMV(r < 0 ? -1 : (WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st))); return true;
 #endif
 }
 

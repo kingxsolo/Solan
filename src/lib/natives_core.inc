@@ -189,13 +189,26 @@ NAT(f_list) {
 
 static void json_str(Buf *b, Str *s) {
   buf_addc(b, '"');
-  for (int i = 0; i < s->len; i++) {
-    unsigned char c = s->chars[i];
-    switch (c) {
-      case '"': buf_add(b, "\\\"", 2); break; case '\\': buf_add(b, "\\\\", 2); break; case '\n': buf_add(b, "\\n", 2); break;
-      case '\r': buf_add(b, "\\r", 2); break; case '\t': buf_add(b, "\\t", 2); break;
-      default: if (c < 0x20) buf_fmt(b, "\\u%04x", c); else buf_addc(b, c);
+  const char *p = s->chars, *end = p + s->len;
+  while (p < end) {
+    /* مسار سريع: نسخ الجرعة الآمنة دفعة واحدة بدل فحص كل بايت عبر buf_addc */
+    const char *q = p;
+    while (q < end) { unsigned char c = (unsigned char)*q; if (c < 0x20 || c == '"' || c == '\\') break; q++; }
+    if (q > p) { buf_add(b, p, (int)(q - p)); p = q; }
+    if (p >= end) break;
+    switch (*p) {
+      case '"': buf_add(b, "\\\"", 2); break;
+      case '\\': buf_add(b, "\\\\", 2); break;
+      case '\n': buf_add(b, "\\n", 2); break;
+      case '\r': buf_add(b, "\\r", 2); break;
+      case '\t': buf_add(b, "\\t", 2); break;
+      default: { /* حرف تحكم < 0x20: ترميز \u يدوياً بلا snprintf */
+        static const char hx[] = "0123456789abcdef";
+        char esc[6] = { '\\', 'u', '0', '0', hx[((*p) >> 4) & 3], hx[*p & 15] };
+        buf_add(b, esc, 6);
+      }
     }
+    p++;
   }
   buf_addc(b, '"');
 }

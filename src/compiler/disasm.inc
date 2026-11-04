@@ -12,6 +12,8 @@ static void disasm_fun(Fun *f, int depth) {
       else if (o == OP_LOOP) fprintf(stdout, " ->%04d", (int)(ip - code) + 3 - a);
       else if (o == OP_CHECK) fprintf(stdout, " mask=%d  ; %s", a, AS_STR(AS_LIST(f->ch.consts.v[(ip[3] << 8) | ip[4]])->a.v[0])->chars);
       else if (o == OP_FOREACH) fprintf(stdout, " slot=%d nv=%d ->%04d", ip[1], ip[2], (int)(ip - code) + 5 + ((ip[3] << 8) | ip[4]));
+      else if (o == OP_RFOREP) fprintf(stdout, " slot=%d flag=%d nv=%d", ip[1], ip[2], ip[3]);
+      else if (o == OP_RFOR) fprintf(stdout, " slot=%d flag=%d nv=%d ->%04d", ip[1], ip[2], ip[3], (int)(ip - code) + 6 + ((ip[4] << 8) | ip[5]));
       else {
         fprintf(stdout, " %d", a);
         if (a < f->ch.consts.n && o != OP_LIST && o != OP_MAP && o != OP_INVOKEV) {

@@ -389,6 +389,26 @@ static int run(int base) {
     }
     NEXT();
   }
+  CASE(OP_RFOREP) { /* تهيئة حلقة المدى: flag=1: [base]=أ [base+1]=ب→العدد [base+2]=العدّاد — flag=0: [base]=العدد [base+1]=العدّاد */
+    uint8_t base = READ8(), flag = READ8(), nv = READ8();
+    Value *s = frame->slots + base;
+    if (!IS_NUM(s[0]) || !IS_NUM(s[1])) RT("مدى: الحدود يجب أن تكون أرقاما");
+    double n = flag ? ceil(s[1].as.n - s[0].as.n) : s[0].as.n;
+    if (!(n > 0)) n = 0; /* NaN والسالب والصفر → حلقة فارغة؛ inf يبقى حلقة لا نهائية (كالمسار القديم) */
+    if (flag) s[1] = NUMV(n); else s[0] = NUMV(n);
+    (void)nv; NEXT();
+  }
+  CASE(OP_RFOR) { /* تكرار المدى: العدّاد i من 0 حتى العدد؛ القيمة = أ + i (flag=1) أو i (flag=0) */
+    uint8_t base = READ8(), flag = READ8(), nv = READ8(); uint16_t off = READ16();
+    Value *s = frame->slots + base;
+    double i = s[flag ? 2 : 1].as.n, n = s[flag ? 1 : 0].as.n;
+    if (!(i < n)) { ip += off; NEXT(); }
+    if (flag) s[2].as.n = i + 1; else s[1].as.n = i + 1; /* العدّاد فقط: وسمه V_NUM ثابت */
+    double v = flag ? s[0].as.n + i : i;
+    if (nv == 2) PUSHL(NUMV(i)); /* ي = الفهرس */
+    PUSHL(NUMV(v)); /* ت/ي = القيمة */
+    NEXT();
+  }
   CASE(OP_TRY) {
     uint16_t off = READ16(); if (vm.hcount >= vm.hmax) RT("حاول متداخلة أكثر من اللازم");
     vm.handlers[vm.hcount].fi = vm.fcount - 1; vm.handlers[vm.hcount].ip = ip + off; vm.handlers[vm.hcount].sp = sp; vm.hcount++; NEXT();

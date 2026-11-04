@@ -3,7 +3,9 @@
 _Static_assert(sizeof(Value) == sizeof(SolanValue), "SolanValue يجب أن يطابق حجم Value");
 _Static_assert(_Alignof(Value) <= _Alignof(SolanValue), "محاذاة SolanValue");
 
-#define TO_V(sv) (*(const Value *)&(sv))
+/* نسخ آمنة بالبايتات بدل type-punning (سلوك غير معرّف تحت -O3/-flto) */
+static inline Value to_v_safe(SolanValue sv) { Value v; memcpy(&v, &sv, sizeof v); return v; }
+#define TO_V(sv) to_v_safe(sv)
 static inline SolanValue to_sv(Value v) { SolanValue s; memcpy(&s, &v, sizeof s); return s; }
 
 static char g_capi_err[1024];

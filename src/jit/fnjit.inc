@@ -12,7 +12,7 @@
 enum { FJT_NONE = 0, FJT_NUM = 1, FJT_BOOL = 2, FJT_FN = 3 };
 
 typedef struct FjGuard { Dict *d; int gi; Str *name; Fun *fun; } FjGuard;
-typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; } FjInfo;
+typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int rec; int maxd; } FjInfo;
 
 static jmp_buf g_fj_jb;
 static int g_fj_depth, g_fj_limit;
@@ -25,7 +25,7 @@ typedef struct {
   int8_t *depth; uint8_t *ty; uint8_t *fnx; uint8_t *reach; uint8_t *islab;
   int nf; Fun *fns[FJ_MAXDEPS]; int fgi[FJ_MAXDEPS]; Str *fname[FJ_MAXDEPS]; void *fentry[FJ_MAXDEPS];
   XB x; int *lpos; int nlab; struct { int pos, lab; } *fix; int nfix;
-  int maxd; const char *why; FV vs[FJ_MAXD];
+  int maxd; const char *why; FV vs[FJ_MAXD]; int rec;
 } FC;
 #define TYP(c, i, k) ((c)->ty[(size_t)(i) * FJ_MAXD + (k)])
 #define FNX(c, i, k) ((c)->fnx[(size_t)(i) * FJ_MAXD + (k)])
@@ -75,6 +75,7 @@ static bool fc_resolve_global(FC *c, Str *name, int *out) {
   Closure *g = AS_CLO(v); Fun *gf = g->f;
   if (g->globals != c->clo->globals || gf->upc != 0 || gf->variadic || gf->kind || gf->getter || gf->arity > FJ_MAXARGS) { c->why = "callee"; return false; }
   for (int i = 0; i < c->nf; i++) if (c->fname[i] == name) { *out = i; return true; }
+  if (gf == c->f) c->rec = 1; /* تعاودية ذاتياً: يحتاج حماية setjmp في التنفيذ */
   if (c->nf >= FJ_MAXDEPS) { c->why = "deps"; return false; }
   void *entry = NULL;
   if (gf != c->f) {
@@ -312,6 +313,18 @@ static bool fj_compile(Closure *clo) {
     fj->deps[fj->nd++] = c->fns[i];
     fj->g[fj->ng].d = &clo->globals->d; fj->g[fj->ng].gi = c->fgi[i]; fj->g[fj->ng].name = c->fname[i]; fj->g[fj->ng].fun = c->fns[i]; fj->ng++;
   }
+  /* أقصى عمق تعاود قابل للوصول: يحدد هل نحتاج setjmp في كل استدعاء */
+  {
+    int md = 1;
+    for (int i = 0; i < c->nf; i++) {
+      if (c->fns[i] == f) { md = 1 << 29; break; }
+      FjInfo *dfj = c->fns[i]->fj;
+      int dm = (dfj && dfj->rec) ? (1 << 29) : (dfj ? dfj->maxd : 1);
+      if (1 + dm > md) md = 1 + dm;
+    }
+    if (c->rec) md = 1 << 29;
+    fj->rec = (md >= (1 << 29)); fj->maxd = md;
+  }
   f->fj = fj; ok = true;
   if (g_jit_trace) fprintf(stderr, "[fnjit] جُمّعت الدالة '%s': %d تعليمة، %d بايت\n", f->name ? f->name->chars : "?", c->n, c->x.n);
 out:
@@ -329,7 +342,9 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
   double a[FJ_MAXARGS];
   for (int i = 0; i < argc; i++) { if (!IS_NUM(args[i])) return false; a[i] = args[i].as.n; }
   g_fj_depth = 0; g_fj_limit = vm.frames_max - vm.fcount - 4; if (g_fj_limit < 16) return false;
-  if (setjmp(g_fj_jb)) { fj->bails++; return false; }
+  /* setjmp مكلف (~40ns): نكتفي به فقط للدوال التي قد تتجاوز حد العمق فعلاً
+     (التعاودية أو سلسلة تبعيات أعمق من الحد). غير ذلك الاستدعاء المباشر آمن. */
+  if (fj->rec || fj->maxd > g_fj_limit) { if (setjmp(g_fj_jb)) { fj->bails++; return false; } }
   double r;
   switch (argc) {
     case 0: r = ((double (*)(void))fj->entry)(); break;

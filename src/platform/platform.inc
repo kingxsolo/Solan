@@ -39,7 +39,7 @@ static const char *g_argv0;
 #if defined(__GLIBC__)
 #include <malloc.h>
 #else
-#define mallopt(a, b) 0
+#define mallopt(a, b) ((void)(a), (void)(b))
 #define M_MMAP_THRESHOLD 0
 #define M_TRIM_THRESHOLD 0
 #endif
@@ -438,7 +438,7 @@ static int w_fcntl(int fd, int cmd, ...) {
 }
 static int w_poll(struct pollfd *p, unsigned n, int t) {
   w_wsa(); SOCKET *sv = (SOCKET *)malloc((n + 1) * sizeof(SOCKET)); int valid = 0;
-  for (unsigned i = 0; i < n; i++) { sv[i] = (SOCKET)p[i].fd; SOCKET s = p[i].fd >= 0 ? w_s((int)p[i].fd) : INVALID_SOCKET; p[i].fd = s; if (s != INVALID_SOCKET) valid++; p[i].revents = 0; }
+  for (unsigned i = 0; i < n; i++) { sv[i] = (SOCKET)p[i].fd; SOCKET s = (p[i].fd != INVALID_SOCKET) ? w_s((int)p[i].fd) : INVALID_SOCKET; p[i].fd = s; if (s != INVALID_SOCKET) valid++; p[i].revents = 0; }
   int r;
   if (!valid) { if (t > 0) Sleep((DWORD)t); else if (t < 0) Sleep(INFINITE); r = 0; }
   else { r = WSAPoll(p, (ULONG)n, t); if (r < 0) w_seterr(); }
@@ -488,7 +488,7 @@ static void os_ignore_sigpipe(void) {}
 /* تهيئة WinSock مبكراً: بعض المسارات (مثل getaddrinfo في جلب HTTP) لا تمر عبر w_socket */
 static void os_early_wsa(void) { w_wsa(); }
 /* تعويض mallopt الخاص بلينكس + تحسين كومة الذاكرة على ويندوز (كومة منخفضة التجزؤ) */
-#define mallopt(a, b) 0
+#define mallopt(a, b) ((void)(a), (void)(b))
 #ifndef M_MMAP_THRESHOLD
 #define M_MMAP_THRESHOLD 0
 #endif

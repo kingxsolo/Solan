@@ -240,13 +240,13 @@ static void fl_make_codes(const unsigned char *len, int n, unsigned short *code)
 static int fl_lcode(int len) { if (len >= 258) return 28; int i = 27; while (FL_LBASE[i] > len) i--; return i; }
 static int fl_dcode(unsigned d) { int i = 29; while (FL_DBASE[i] > d) i--; return i; }
 
-static void fl_write_block(FlWr *w, const unsigned short *tl, const unsigned short *td, int nt, const unsigned char *raw, size_t rawlen, int final) {
+static void fl_write_block(FlWr *w, const unsigned short *ltree, const unsigned short *td, int nt, const unsigned char *raw, size_t rawlen, int final) {
   uint32_t lf[286], df[30], cf[19]; unsigned char ll[288], dl[30], cl[19]; unsigned short lcod[288], dcod[30], ccod[19];
   memset(ll, 0, sizeof ll); memset(lf, 0, sizeof lf); memset(df, 0, sizeof df); memset(cf, 0, sizeof cf);
   uint64_t ebits = 0; lf[256] = 1;
   for (int i = 0; i < nt; i++) {
-    if (td[i] == 0) lf[tl[i]]++;
-    else { int lc = fl_lcode(tl[i]), dc = fl_dcode(td[i]); lf[257 + lc]++; df[dc]++; ebits += FL_LEXT[lc] + FL_DEXT[dc]; }
+    if (td[i] == 0) lf[ltree[i]]++;
+    else { int lc = fl_lcode(ltree[i]), dc = fl_dcode(td[i]); lf[257 + lc]++; df[dc]++; ebits += FL_LEXT[lc] + FL_DEXT[dc]; }
   }
   fl_build_len(lf, 286, 15, ll); fl_build_len(df, 30, 15, dl);
   { int any = 0; for (int i = 0; i < 30; i++) if (dl[i]) any = 1; if (!any) dl[0] = 1; }
@@ -291,10 +291,10 @@ static void fl_write_block(FlWr *w, const unsigned short *tl, const unsigned sho
   }
   fl_make_codes(ll, 288, lcod); fl_make_codes(dl, 30, dcod);
   for (int i = 0; i < nt; i++) {
-    if (td[i] == 0) fw_put(w, lcod[tl[i]], ll[tl[i]]);
+    if (td[i] == 0) fw_put(w, lcod[ltree[i]], ll[ltree[i]]);
     else {
-      int lc = fl_lcode(tl[i]), dc = fl_dcode(td[i]);
-      fw_put(w, lcod[257 + lc], ll[257 + lc]); if (FL_LEXT[lc]) fw_put(w, (uint32_t)(tl[i] - FL_LBASE[lc]), FL_LEXT[lc]);
+      int lc = fl_lcode(ltree[i]), dc = fl_dcode(td[i]);
+      fw_put(w, lcod[257 + lc], ll[257 + lc]); if (FL_LEXT[lc]) fw_put(w, (uint32_t)(ltree[i] - FL_LBASE[lc]), FL_LEXT[lc]);
       fw_put(w, dcod[dc], dl[dc]); if (FL_DEXT[dc]) fw_put(w, (uint32_t)(td[i] - FL_DBASE[dc]), FL_DEXT[dc]);
     }
   }
@@ -316,15 +316,15 @@ static int fl_find(const unsigned char *in, int n, int pos, const int *head, con
 }
 static int fl_deflate_raw(const unsigned char *in, int n, FlBuf *out) {
   FlWr w; w.out = out; w.bb = 0; w.bc = 0;
-  unsigned short *tl = (unsigned short *)malloc(sizeof(unsigned short) * FL_MAXTOK * 2), *td;
+  unsigned short *ltree = (unsigned short *)malloc(sizeof(unsigned short) * FL_MAXTOK * 2), *td;
   int *head = (int *)malloc(sizeof(int) * 32768), *prev = (int *)malloc(sizeof(int) * FL_WIN);
-  if (!tl || !head || !prev) { free(tl); free(head); free(prev); return -1; }
-  td = tl + FL_MAXTOK; memset(head, 0xff, sizeof(int) * 32768);
+  if (!ltree || !head || !prev) { free(ltree); free(head); free(prev); return -1; }
+  td = ltree + FL_MAXTOK; memset(head, 0xff, sizeof(int) * 32768);
   int nt = 0, i = 0, plen = 0, pdist = 0, havep = 0; size_t rstart = 0, rlen = 0;
 #define FL_INS(P) do { int P_ = (P); if (n - P_ >= 3) { unsigned h_ = fl_hash3(in + P_); prev[P_ & (FL_WIN - 1)] = head[h_]; head[h_] = P_; } } while (0)
-#define FL_FLUSH(FIN) do { fl_write_block(&w, tl, td, nt, in + rstart, rlen, (FIN)); rstart += rlen; rlen = 0; nt = 0; } while (0)
-#define FL_LIT(B) do { tl[nt] = (B); td[nt] = 0; nt++; rlen++; if (nt >= FL_MAXTOK || rlen >= FL_BLKRAW) FL_FLUSH(0); } while (0)
-#define FL_MATCH(L, D) do { tl[nt] = (unsigned short)(L); td[nt] = (unsigned short)(D); nt++; rlen += (size_t)(L); if (nt >= FL_MAXTOK || rlen >= FL_BLKRAW) FL_FLUSH(0); } while (0)
+#define FL_FLUSH(FIN) do { fl_write_block(&w, ltree, td, nt, in + rstart, rlen, (FIN)); rstart += rlen; rlen = 0; nt = 0; } while (0)
+#define FL_LIT(B) do { ltree[nt] = (B); td[nt] = 0; nt++; rlen++; if (nt >= FL_MAXTOK || rlen >= FL_BLKRAW) FL_FLUSH(0); } while (0)
+#define FL_MATCH(L, D) do { ltree[nt] = (unsigned short)(L); td[nt] = (unsigned short)(D); nt++; rlen += (size_t)(L); if (nt >= FL_MAXTOK || rlen >= FL_BLKRAW) FL_FLUSH(0); } while (0)
   while (i < n) {
     int l = 0, d = 0;
     if (n - i >= 3) { l = fl_find(in, n, i, head, prev, &d); FL_INS(i); }
@@ -336,7 +336,7 @@ static int fl_deflate_raw(const unsigned char *in, int n, FlBuf *out) {
   }
   if (havep) FL_MATCH(plen, pdist);
   FL_FLUSH(1); fw_align(&w);
-  free(tl); free(head); free(prev);
+  free(ltree); free(head); free(prev);
   return out->oom ? -1 : 0;
 }
 

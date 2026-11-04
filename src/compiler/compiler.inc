@@ -603,9 +603,9 @@ static void while_stmt(void) {
   expression(); int ex = emit_jump(OP_JIF); emit(OP_POP); block(); emit_loop(start);
   patch_jump(ex); emit(OP_POP); loop_end(&lp);
 }
-static int range_loop_expr(int *ra, int *rs) {
+static int range_loop_expr(int *ra, int *rs, int *raw) {
   static Str *rng = NULL; if (!rng) rng = normstr("مدى");
-  *ra = *rs = -1;
+  *ra = *rs = -1; if (raw) *raw = 0;
   if (P.cur.t != T_IDENT || P.cur.s != rng) return 0;
   bool isconst = false;
   if (resolve_local(C, rng, &isconst) >= 0 || resolve_upvalue(C, rng, &isconst) >= 0) return 0;
@@ -626,9 +626,11 @@ static int range_loop_expr(int *ra, int *rs) {
 
   expression(); *ra = add_local(intern_c("$ra"), true, false);
   consume(T_COMMA, "توقعت '،'"); expression(); int rb = add_local(intern_c("$rb"), true, false);
-  if (commas == 2) { consume(T_COMMA, "توقعت '،'"); expression(); } else emit_const(NUMV(1));
-  *rs = add_local(intern_c("$rs"), true, false);
+  if (commas == 2) { consume(T_COMMA, "توقعت '،'"); expression(); }
   consume(T_RP, "توقعت ')'");
+  if (commas == 1 && raw) { *raw = 1; return 3; } /* مسار سريع: أ و ب مربوطتان بـ $ra/$rb على المكدس — بلا خطوة ولا استدعاء */
+  if (commas < 2) emit_const(NUMV(1)); /* الخطوة الافتراضية تُدفع فقط عند غيابها — مع خطوة صريحة تبقى على المكدس لـ $rs */
+  *rs = add_local(intern_c("$rs"), true, false);
   named_variable(normstr("_عدد_المدى"), false);
   emit2(OP_GET_LOCAL, (uint8_t)*ra); emit2(OP_GET_LOCAL, (uint8_t)rb); emit2(OP_GET_LOCAL, (uint8_t)*rs); emit2(OP_CALL, 3);
   return 2;
@@ -638,11 +640,30 @@ static void for_stmt(void) {
   soft_ident(); if (P.cur.t != T_IDENT) cerror_at(&P.cur, "توقعت اسم متغير بعد 'لكل'"); advance(); Str *v1 = P.prev.s, *v2 = NULL;
   if (match(T_COMMA)) { soft_ident(); if (P.cur.t != T_IDENT) cerror_at(&P.cur, "توقعت اسم متغير"); advance(); v2 = P.prev.s; }
   consume(T_IN, "توقعت 'في' في حلقة 'لكل'");
-  int ra, rs; int rk = range_loop_expr(&ra, &rs); if (!rk) expression();
+  int raw = 0, ra, rs; int rk = range_loop_expr(&ra, &rs, &raw); if (!rk) expression();
+  int nv = v2 ? 2 : 1;
+  if (raw || rk == 1) {
+    /* مسار المدى السريع (OP_RFOR): عدّاد صحيح من 0 حتى العدد، والقيمة = أ + العدّاد — بلا فحوص نوع لكل تكرار */
+    int base;
+    if (raw) {
+      base = ra; /* slots[ra]=أ، slots[ra+1]=ب — RFOREP يستبدل ب بالعدد ceil(ب-أ) */
+      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false); /* slots[ra+2] = العدّاد */
+    } else {
+      base = add_local(intern_c("$r1"), true, false); /* slots[base] = العدد ن */
+      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false); /* slots[base+1] = العدّاد */
+    }
+    emit(OP_RFOREP); emit((uint8_t)base); emit((uint8_t)(raw ? 1 : 0)); emit((uint8_t)nv);
+    Loop lp; int start = chunk()->n; loop_begin(&lp, start);
+    emit(OP_RFOR); emit((uint8_t)base); emit((uint8_t)(raw ? 1 : 0)); emit((uint8_t)nv); emit(0xff); emit(0xff); int ex = chunk()->n - 2;
+    begin_scope(); add_local(v1, true, false); if (v2) add_local(v2, true, false);
+    block(); end_scope(); emit_loop(start);
+    patch_jump(ex); loop_end(&lp); end_scope();
+    return;
+  }
   int base = add_local(intern_c("$c"), true, false);
   emit_const(NUMV(0)); add_local(intern_c("$i"), true, false);
   emit_const(NUMV(0)); add_local(intern_c("$m"), true, false);
-  int nv = v2 ? 2 : 1; emit2(OP_ITERPREP, (uint8_t)nv);
+  emit2(OP_ITERPREP, (uint8_t)nv);
   Loop lp; int start = chunk()->n; loop_begin(&lp, start);
   emit(OP_FOREACH); emit((uint8_t)base); emit((uint8_t)nv); emit(0xff); emit(0xff); int ex = chunk()->n - 2;
   begin_scope(); int s1 = add_local(v1, true, false); int s2 = v2 ? add_local(v2, true, false) : -1;

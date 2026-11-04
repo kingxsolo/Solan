@@ -90,11 +90,18 @@ static void collect(void) {
 }
 
 static int g_digits = 0;
+static int fnr_itoa(double n, char *o) { /* عدد صحيح |n| < 1e15 → أرقام عشرية سريعة */
+  unsigned long long u = (unsigned long long)fabs(n); char t[24]; int n2 = 0, k = 0;
+  do { t[n2++] = (char)('0' + u % 10); u /= 10; } while (u);
+  if (n < 0) o[k++] = '-';
+  while (n2) o[k++] = t[--n2];
+  return k;
+}
 static void fmt_num_raw(double n, Buf *b) {
-  if (isnan(n)) { buf_fmt(b, "nan"); return; }
-  if (isinf(n)) { buf_fmt(b, n < 0 ? "-inf" : "inf"); return; }
-  if (n == 0) { buf_fmt(b, "0"); return; }
-  if (n == floor(n) && fabs(n) < 1e15) { buf_fmt(b, "%.0f", n); return; }
+  if (isnan(n)) { buf_add(b, "nan", 3); return; }
+  if (isinf(n)) { buf_add(b, n < 0 ? "-inf" : "inf", 4); return; }
+  if (n == 0) { buf_addc(b, '0'); return; }
+  if (n == floor(n) && fabs(n) < 1e15) { char t[24]; buf_add(b, t, fnr_itoa(n, t)); return; } /* الأعداد الصحيحة: بلا vsnprintf */
   char t[48]; int p;
   for (p = 15; p <= 17; p++) { snprintf(t, sizeof t, "%.*e", p - 1, n); if (strtod(t, NULL) == n) break; }
   char dg[24]; int k = 0; const char *q = t; bool neg = false;

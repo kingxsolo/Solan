@@ -364,7 +364,6 @@ NAT(net_serve) {
       fflush(stdout); pid_t pid = fork();
       if (pid == 0) { close(lfd); handle_conn(c, ip, a[1]); fflush(stdout); _exit(0); }
 #else
-      pid_t pid = 1;
 #endif
       if (ssl_of[c]) tl.SSL_free(ssl_of[c]); close(c); fd_setup(c); served++; continue;
     }

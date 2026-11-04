@@ -1,16 +1,16 @@
 static void json_nl(Buf *b, int indent, int lvl) { if (indent > 0) { buf_addc(b, '\n'); for (int i = 0; i < indent * lvl; i++) buf_addc(b, ' '); } }
 static void json_enc(Value v, Buf *b, int indent, int lvl) {
-  if (lvl > 60) { buf_fmt(b, "null"); return; }
+  if (lvl > 60) { buf_add(b, "null", 4); return; }
   switch (v.t) {
-    case V_NIL: case V_EMPTY: buf_fmt(b, "null"); return;
-    case V_BOOL: buf_fmt(b, v.as.b ? "true" : "false"); return;
-    case V_NUM: if (isnan(v.as.n) || isinf(v.as.n)) buf_fmt(b, "null"); else fmt_num_raw(v.as.n, b); return;
+    case V_NIL: case V_EMPTY: buf_add(b, "null", 4); return;
+    case V_BOOL: buf_add(b, v.as.b ? "true" : "false", v.as.b ? 4 : 5); return;
+    case V_NUM: if (isnan(v.as.n) || isinf(v.as.n)) buf_add(b, "null", 4); else fmt_num_raw(v.as.n, b); return;
     default: break;
   }
   switch (v.as.o->t) {
     case O_STR: json_str(b, AS_STR(v)); return;
     case O_LIST: {
-      List *l = AS_LIST(v); if (!l->a.n) { buf_fmt(b, "[]"); return; }
+      List *l = AS_LIST(v); if (!l->a.n) { buf_add(b, "[]", 2); return; }
       buf_addc(b, '[');
       for (int i = 0; i < l->a.n; i++) { if (i) buf_addc(b, ','); json_nl(b, indent, lvl + 1); json_enc(l->a.v[i], b, indent, lvl + 1); }
       json_nl(b, indent, lvl); buf_addc(b, ']'); return;
@@ -37,7 +37,14 @@ typedef struct { const char *p, *end; bool err; } JP;
 static void jws(JP *j) { while (j->p < j->end && (*j->p == ' ' || *j->p == '\n' || *j->p == '\t' || *j->p == '\r')) j->p++; }
 static Value jval(JP *j, int depth);
 static Value jstr(JP *j) {
-  Buf b; buf_init(&b); j->p++;
+  j->p++;
+  /* مسار سريع: نص بلا تهريب → نسخة مباشرة بلا Buf وبدل بايت-ببايت */
+  {
+    const char *q = j->p;
+    while (q < j->end) { char c = *q; if (c == '"' || c == '\\') break; q++; }
+    if (q < j->end && *q == '"') { Value v = mkstr(j->p, (int)(q - j->p)); j->p = q + 1; return v; }
+  }
+  Buf b; buf_init(&b);
   while (j->p < j->end && *j->p != '"') {
     if (*j->p == '\\' && j->p + 1 < j->end) {
       j->p++;
@@ -55,7 +62,12 @@ static Value jstr(JP *j) {
         default: buf_addc(&b, *j->p);
       }
       j->p++;
-    } else buf_addc(&b, *j->p++);
+    } else {
+      /* نسخ الجرعة حتى التهريب أو نهاية النص دفعة واحدة */
+      const char *q = j->p;
+      while (q < j->end && *q != '"' && *q != '\\') q++;
+      buf_add(&b, j->p, (int)(q - j->p)); j->p = q;
+    }
   }
   if (j->p >= j->end) j->err = true; else j->p++;
   Value v = mkstr(buf_cstr(&b), b.n); free(b.p); return v;
