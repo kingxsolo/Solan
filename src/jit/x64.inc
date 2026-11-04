@@ -1,5 +1,5 @@
 #ifndef SOLAN_JIT
-#if defined(__x86_64__) && defined(__linux__)
+#if defined(__x86_64__) && (defined(__linux__) || defined(_WIN32))
 #define SOLAN_JIT 1
 #else
 #define SOLAN_JIT 0
@@ -7,6 +7,12 @@
 #endif
 
 #if SOLAN_JIT
+/* اتفاقية استدعاء ويندوز x64: الوسيط الأول في RCX، وRSI/RDI محفوظة، وXMM6-15 محفوظة، وتلزم مساحة ظل 32 بايت */
+#if defined(_WIN32)
+#define JX_WIN 1
+#else
+#define JX_WIN 0
+#endif
 enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 };
 enum { CC_O, CC_NO, CC_B, CC_AE, CC_E, CC_NE, CC_BE, CC_A, CC_S, CC_NS, CC_P, CC_NP, CC_L, CC_GE, CC_LE, CC_G };
 

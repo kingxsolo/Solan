@@ -55,6 +55,9 @@ int main(int argc, char **argv) {
   os_console_init(); os_args_utf8(&argc, &argv);
   setvbuf(stdout, NULL, _IOLBF, 0); os_ignore_sigpipe();
   mallopt(M_MMAP_THRESHOLD, 256 << 20); mallopt(M_TRIM_THRESHOLD, 512 << 20);
+#if SOLAN_WIN
+  os_heap_tune();
+#endif
   vm_init();
   { const char *se = getenv("SOLAN_SAFE"); if (se && se[0] && se[0] != '0') { g_safe = true; g_perm = PM_READ | PM_ENV; } }
   int ai = 1;

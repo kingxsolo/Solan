@@ -16,3 +16,9 @@ third_party/sqlite/*.o
 
 # Editor settings
 .vscode/settings.json
+
+# PC build outputs
+/dist/
+/tools/
+pc/solan.res
+pc/*.res

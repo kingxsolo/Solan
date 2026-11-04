@@ -1,0 +1,148 @@
+# =====================================================================
+#  سولان (Solan) — بناء نسخة ويندوز الأصلية
+#  بناء 100% ويندوز: لا MSYS2، لا WSL، لا بيئة لينكس.
+#  الناتج: solan.exe واحد ثابت (static) سريع + مُثبِّت Setup.exe
+#
+#  الاستعمال:
+#    powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1            # بناء عادي
+#    powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -V3        # بناء AVX2 للأجهزة الحديثة
+#    powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer # بناء + إنشاء المُثبِّت
+# =====================================================================
+param(
+  [string]$GccBin = "",           # مسار مجلد bin للمترجم (يُكتشف تلقائياً إن تُرك فارغاً)
+  [switch]$V3,                    # استهداف x86-64-v3 (AVX2) — أسرع على الأجهزة الحديثة (2013+)
+  [switch]$Installer,             # بناء المُثبِّت أيضاً (يتطلب Inno Setup)
+  [switch]$NoStrip
+)
+$ErrorActionPreference = "Stop"
+Set-Location (Join-Path $PSScriptRoot "..")
+
+$VER = "1.1.0"
+$OUT = "dist"
+New-Item -ItemType Directory -Force -Path $OUT | Out-Null
+
+# ---------- 1) إيجاد المترجم ----------
+function Find-Gcc {
+  param([string]$Hint)
+  $cands = @()
+  if ($Hint) { $cands += $Hint }
+  $cands += "C:\Solan-PC\tools\winlibs\mingw64\bin"
+  $cands += "C:\tools\winlibs\mingw64\bin"
+  $cands += (Join-Path $env:LOCALAPPDATA "Programs\WinLibs\mingw64\bin")
+  foreach ($c in (Get-Command gcc -ErrorAction SilentlyContinue)) { $cands += $c.Source }
+  foreach ($c in $cands) {
+    if (-not $c) { continue }
+    $p = if ($c -like "*.exe") { $c } else { Join-Path $c "gcc.exe" }
+    if (Test-Path $p) { return (Split-Path $p) }
+  }
+  return $null
+}
+
+$gccDir = Find-Gcc $GccBin
+if (-not $gccDir) {
+  Write-Host "✗ لم يُعثر على مترجم GCC." -ForegroundColor Red
+  Write-Host "  الحل السريع: شغّل pc\get-compiler.ps1 لتنزيل مترجم محمول تلقائياً."
+  exit 1
+}
+$env:Path = "$gccDir;$env:Path"
+$gccVer = & gcc -dumpversion
+Write-Host "✓ المترجم: $(Join-Path $gccDir 'gcc.exe') (إصدار $gccVer)" -ForegroundColor Green
+
+# ---------- 2) ملف الموارد (أيقونة + معلومات الإصدار + بيان Manifest) ----------
+$manifest = @"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="$VER.0" processorArchitecture="*" name="Solan.Solan" type="win32"/>
+  <description>سولان — لغة برمجة عربية</description>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings xmlns:ws2005="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+    </application>
+  </compatibility>
+</assembly>
+"@
+Set-Content -Path "pc\solan.manifest" -Value $manifest -Encoding UTF8
+
+$rc = @"
+1 VERSIONINFO
+FILEVERSION     1,1,0,0
+PRODUCTVERSION  1,1,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "Solan Project"
+      VALUE "FileDescription",  "سولان — لغة برمجة عربية (نسخة ويندوز الأصلية)"
+      VALUE "FileVersion",      "$VER"
+      VALUE "InternalName",     "solan"
+      VALUE "LegalCopyright",   "MIT-style License - Solan Project"
+      VALUE "OriginalFilename", "solan.exe"
+      VALUE "ProductName",      "Solan"
+      VALUE "ProductVersion",   "$VER"
+    END
+  END
+  BLOCK "VariableInfo" { }
+END
+1 24 "solan.manifest"
+"@
+# ملاحظة: إن وُجدت أيقونة تُضاف سطر: 1 ICON "solan.ico"
+if (Test-Path "pc\solan.ico") { $rc = $rc -replace '1 24 "solan.manifest"', "1 ICON `"solan.ico`"`r`n1 24 `"solan.manifest`"" }
+Set-Content -Path "pc\solan.rc" -Value $rc -Encoding ASCII
+
+& windres "pc\solan.rc" -O coff -o "pc\solan.res" -I pc
+if ($LASTEXITCODE -ne 0) { throw "فشل تجميع الموارد (windres)" }
+
+# ---------- 3) التجميع بأقصى تحسين ----------
+$arch = if ($V3) { "x86-64-v3" } else { "x86-64-v2" }
+$strip = if ($NoStrip) { "" } else { "-Wl,-s" }
+$exe = if ($V3) { "$OUT\solan-v3.exe" } else { "$OUT\solan.exe" }
+
+Write-Host "▸ تجميع سولان (استهداف $arch، ربط ثابت، LTO)..." -ForegroundColor Cyan
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+& gcc solan.c "pc\solan.res" -o $exe `
+  -O3 -flto=auto -fno-ident -fno-math-errno `
+  "-march=$arch" -mtune=generic `
+  -ffunction-sections -fdata-sections -fvisibility=hidden `
+  -static -static-libgcc `
+  -Wl,--gc-sections -Wl,-O2 -Wl,--as-needed $strip `
+  -D_WIN32_WINNT=0x0A00 `
+  -lws2_32 -lshell32 -ladvapi32 -lm
+if ($LASTEXITCODE -ne 0) { throw "فشل التجميع" }
+$sw.Stop()
+Write-Host "✓ اكتمل البناء في $([math]::Round($sw.Elapsed.TotalSeconds,1)) ثانية" -ForegroundColor Green
+
+$size = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+Write-Host "✓ الناتج: $exe ($size MB)" -ForegroundColor Green
+
+# ---------- 4) فحص سريع ----------
+& $exe --version
+if ($LASTEXITCODE -ne 0) { throw "الملف التنفيذي لا يعمل" }
+& $exe -e 'اطبع("سولان على ويندوز يعمل ✓")'
+
+# ---------- 5) المُثبِّت ----------
+if ($Installer) {
+  Write-Host "▸ بناء المُثبِّت (Inno Setup)..." -ForegroundColor Cyan
+  $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $iscc) {
+    Write-Host "  تثبيت Inno Setup..." 
+    winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
+    $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  }
+  if (-not $iscc) { Write-Host "✗ لم أجد ISCC.exe — ثبّت Inno Setup يدوياً" -ForegroundColor Yellow; exit 1 }
+  & $iscc "pc\installer.iss" /DExeName=$exe
+  if ($LASTEXITCODE -ne 0) { throw "فشل بناء المُثبِّت" }
+  Write-Host "✓ المُثبِّت: $OUT\Solan-Setup.exe" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "تم! جرّب:  $($exe.Replace((Get-Location).Path + '\','')) هلا.سو" -ForegroundColor Yellow

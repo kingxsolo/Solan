@@ -32,7 +32,7 @@ static void jit_free_regions(Fun *f) {
 #define TMP_LO 3
 #define TMP_HI 7
 #define VAR_LO 8
-#define SAVE_AREA 112
+/* مساحة الحفظ تُعرَّف داخل jit_compile حسب المنصة (JX_SAVE_AREA) */
 
 typedef struct { const uint8_t *ip; uint8_t op; int a, b, c; int len; int tgt; const uint8_t *tip; } JI;
 typedef struct { int pos, lab; } JF;
@@ -297,7 +297,13 @@ static void jc_save_regs(JC *c) { for (int r = 3; r <= 15; r++) jx_movsd_mr(&c->
 static void jc_restore_regs(JC *c) { for (int r = 3; r <= 15; r++) jx_movsd_rm(&c->x, r, RSP, (r - 3) * 8); }
 static void jc_call_helper(JC *c, void *fn) {
   jc_save_regs(c);
+#if JX_WIN
+  jx_sub_rsp(&c->x, 32); /* مساحة الظل التي يتوقعها المستدعى على ويندوز */
+#endif
   jx_mov_ri(&c->x, RAX, (uint64_t)(uintptr_t)fn); jx_call_rax(&c->x);
+#if JX_WIN
+  jx_add_rsp(&c->x, 32);
+#endif
   jc_restore_regs(c);
 }
 
@@ -797,8 +803,22 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jc_promote(c);
   XB *x = &c->x;
   jx_push(x, RBX); jx_push(x, R12); jx_push(x, R13); jx_push(x, R14); jx_push(x, R15);
-  jx_sub_rsp(x, SAVE_AREA);
+#if JX_WIN
+  /* على ويندوز RSI وRDI محفوظتان (callee-saved) يجب إرجاعهما كما استُقبلتا */
+  jx_push(x, RDI); jx_push(x, RSI);
+#define JX_SAVE_AREA 192 /* 112 لعمليات الحفظ المؤقتة + 80 لقيم XMM6-15 الواردة */
+#else
+#define JX_SAVE_AREA 112
+#endif
+  jx_sub_rsp(x, JX_SAVE_AREA);
+#if JX_WIN
+  /* حفظ XMM6-15 الواردة من الـ VM (محفوظة على ويندوز) لاستعادتها عند الخروج */
+  for (int r = 6; r <= 15; r++) jx_movsd_mr(x, RSP, 112 + (r - 6) * 8, r);
+  /* وسيط JitCtx* الأول يصل في RCX على ويندوز (بدل RDI في لينكس) */
+  jx_mov_rr(x, R15, RCX);
+#else
   jx_mov_rr(x, R15, RDI);
+#endif
   jx_mov_rm(x, RBX, R15, (int)offsetof(JitCtx, slots)); jx_mov_rm(x, R12, R15, (int)offsetof(JitCtx, sp)); jx_mov_rm(x, R14, R15, (int)offsetof(JitCtx, clo));
   int lguards = jc_new_label(c), lbody = jc_new_label(c), lepi = jc_new_label(c);
   jc_jmp(c, lguards);
@@ -840,7 +860,14 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
     jc_jmp(c, lepi);
   }
   jc_bind(c, lepi);
-  jx_add_rsp(x, SAVE_AREA);
+#if JX_WIN
+  /* استعادة XMM6-15 كما استُقبلت من الـ VM */
+  for (int r = 6; r <= 15; r++) jx_movsd_rm(x, r, RSP, 112 + (r - 6) * 8);
+#endif
+  jx_add_rsp(x, JX_SAVE_AREA);
+#if JX_WIN
+  jx_pop(x, RSI); jx_pop(x, RDI);
+#endif
   jx_pop(x, R15); jx_pop(x, R14); jx_pop(x, R13); jx_pop(x, R12); jx_pop(x, RBX); jx_ret(x);
   for (int k = 0; k < c->npool; k++) { jc_bind(c, c->poollab[k]); xb_u64(x, c->pool[k]); }
   if (c->x.n > c->x.cap || c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] فشل: %s\n", c->why ? c->why : "حجم"); goto out; }

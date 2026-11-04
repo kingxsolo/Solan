@@ -2,7 +2,11 @@
 #define FJ_TH 40
 #define FJ_MAXD 40
 #define FJ_MAXI 1500
+#if JX_WIN
+#define FJ_MAXARGS 4 /* ويندوز: الوسائط العشرية الأربعة الأولى فقط في سجلات XMM */
+#else
 #define FJ_MAXARGS 6
+#endif
 #define FJ_MAXDEPS 8
 #define FJ_MAXFIX 6000
 enum { FJT_NONE = 0, FJT_NUM = 1, FJT_BOOL = 2, FJT_FN = 3 };
@@ -25,7 +29,12 @@ typedef struct {
 } FC;
 #define TYP(c, i, k) ((c)->ty[(size_t)(i) * FJ_MAXD + (k)])
 #define FNX(c, i, k) ((c)->fnx[(size_t)(i) * FJ_MAXD + (k)])
+#if JX_WIN
+/* على ويندوز: أول 32 بايت من الإطار مخصصة كمساحة ظل (shadow space) لاستدعاءات الدوال C */
+#define CELL(i) RSP, (int)(32 + 8 * (i))
+#else
 #define CELL(i) RSP, (int)(8 * (i))
+#endif
 
 static bool fj_compile(Closure *clo);
 
@@ -282,7 +291,11 @@ static bool fj_compile(Closure *clo) {
   c->x.cap = 1 << 17; c->x.p = malloc((size_t)c->x.cap); c->x.n = 0;
   c->lpos = malloc(sizeof(int) * (size_t)(c->n + 4)); for (int i = 0; i < c->n + 4; i++) c->lpos[i] = -1;
   c->fix = malloc(sizeof(c->fix[0]) * FJ_MAXFIX);
+#if JX_WIN
+  int fs = ((c->maxd + 2) * 8 + 32 + 15) & ~15; /* +32 لمساحة الظل */
+#else
   int fs = ((c->maxd + 2) * 8 + 15) & ~15;
+#endif
   fc_emit(c, fs);
   if (c->why || c->x.n > c->x.cap) { if (g_jit_trace) fprintf(stderr, "[fnjit] فشل التوليد: %s\n", c->why ? c->why : "size"); goto out; }
   for (int k = 0; k < c->nfix; k++) {

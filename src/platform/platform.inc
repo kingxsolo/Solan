@@ -473,6 +473,18 @@ static int os_mkstemp(char *tmpl) {
   wchar_t *w = w_utf16(tmpl); int fd = _wopen(w, _O_RDWR | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE); free(w); return fd;
 }
 static void os_ignore_sigpipe(void) {}
+/* تعويض mallopt الخاص بلينكس + تحسين كومة الذاكرة على ويندوز (كومة منخفضة التجزؤ) */
+#define mallopt(a, b) 0
+#ifndef M_MMAP_THRESHOLD
+#define M_MMAP_THRESHOLD 0
+#endif
+#ifndef M_TRIM_THRESHOLD
+#define M_TRIM_THRESHOLD 0
+#endif
+static void os_heap_tune(void) {
+  ULONG info = 2; /* HeapCompatibilityInformation: LFH */
+  HeapSetInformation(GetProcessHeap(), HeapCompatibilityInformation, &info, sizeof info);
+}
 static void os_console_init(void) {
   SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8);
   _setmode(_fileno(stdout), _O_BINARY); _setmode(_fileno(stderr), _O_BINARY);
@@ -489,6 +501,34 @@ static void os_args_utf8(int *argc, char ***argv) {
 static const char *os_devtty(void) { return "CONIN$"; }
 static bool os_is_abs(const char *p) { return p[0] == '/' || p[0] == '\\' || (((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':'); }
 static const char *os_name(void) { return "windows"; }
+
+/* --- طبقة توافق ذاكرة الكود التنفيذي للويندوز (للـ JIT) --- */
+#ifndef MAP_FAILED
+#define MAP_FAILED ((void *)-1)
+#endif
+#ifndef PROT_READ
+#define PROT_READ  0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC  0x4
+#define MAP_PRIVATE 0x02
+#define MAP_ANONYMOUS 0x20
+#endif
+static void *w_mmap(void *addr, size_t len, int prot, int flags, int fd, long long off) {
+  (void)addr; (void)flags; (void)fd; (void)off;
+  if (!len) return MAP_FAILED;
+  DWORD t = (prot & PROT_EXEC) ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+  void *p = VirtualAlloc(NULL, len, MEM_RESERVE | MEM_COMMIT, t);
+  return p ? p : MAP_FAILED;
+}
+static int w_munmap(void *p, size_t n) { (void)n; return VirtualFree(p, 0, MEM_RELEASE) ? 0 : -1; }
+static int w_mprotect(void *p, size_t n, int prot) {
+  (void)n; DWORD o = 0;
+  DWORD t = (prot & PROT_EXEC) ? PAGE_EXECUTE_READ : PAGE_READWRITE;
+  return VirtualProtect(p, n, t, &o) ? 0 : -1;
+}
+#define mmap(a, b, c, d, e, f) w_mmap(a, b, c, d, e, f)
+#define munmap(a, b) w_munmap(a, b)
+#define mprotect(a, b, c) w_mprotect(a, b, c)
 
 static const char *solan_strptime(const char *s, const char *f, struct tm *tm) {
   for (; *f; f++) {
