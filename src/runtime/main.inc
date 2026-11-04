@@ -53,6 +53,9 @@ static bool pk_q(char *dst, size_t sz, const char *s) {
 int main(int argc, char **argv) {
   g_argv0 = argc > 0 ? argv[0] : NULL;
   os_console_init(); os_args_utf8(&argc, &argv);
+#if SOLAN_WIN
+  os_early_wsa();
+#endif
   setvbuf(stdout, NULL, _IOLBF, 0); os_ignore_sigpipe();
   mallopt(M_MMAP_THRESHOLD, 256 << 20); mallopt(M_TRIM_THRESHOLD, 512 << 20);
 #if SOLAN_WIN

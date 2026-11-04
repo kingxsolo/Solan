@@ -14,7 +14,7 @@ param(
   [switch]$Installer,             # بناء المُثبِّت أيضاً (يتطلب Inno Setup)
   [switch]$NoStrip
 )
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"   # ملاحظة: أخطاء المترجمات تُكشف عبر $LASTEXITCODE وليس عبر استثناءات PowerShell
 Set-Location (Join-Path $PSScriptRoot "..")
 
 $VER = "1.1.0"
@@ -26,8 +26,9 @@ function Find-Gcc {
   param([string]$Hint)
   $cands = @()
   if ($Hint) { $cands += $Hint }
+  $cands += "C:\Solan-PC\tools\mingw64\bin"
   $cands += "C:\Solan-PC\tools\winlibs\mingw64\bin"
-  $cands += "C:\tools\winlibs\mingw64\bin"
+  $cands += "C:\tools\mingw64\bin"
   $cands += (Join-Path $env:LOCALAPPDATA "Programs\WinLibs\mingw64\bin")
   foreach ($c in (Get-Command gcc -ErrorAction SilentlyContinue)) { $cands += $c.Source }
   foreach ($c in $cands) {
@@ -47,6 +48,22 @@ if (-not $gccDir) {
 $env:Path = "$gccDir;$env:Path"
 $gccVer = & gcc -dumpversion
 Write-Host "✓ المترجم: $(Join-Path $gccDir 'gcc.exe') (إصدار $gccVer)" -ForegroundColor Green
+
+# ---------- 1ب) تعطيل manifest المترجم الافتراضي ----------
+# gcc/ld يربطان default-manifest.o دائماً، فيتعارض مع manifest سولان ويبقى
+# manifestان في الملف النهائي (تحذير .rsrc merge failure — مشكلة MSYS2 #454).
+# الحل المعروف: استبداله بكائن فارغ لتبقى manifest سولان وحيدة.
+$dmPath = Join-Path (Split-Path $gccDir) "x86_64-w64-mingw32\lib\default-manifest.o"
+if (Test-Path $dmPath) {
+  $emptyC = Join-Path $env:TEMP "solan_dm_empty.c"
+  Set-Content -Path $emptyC -Value "" -Encoding ASCII
+  & gcc -c $emptyC -o "$env:TEMP\solan_dm_empty.o" 2>$null
+  if ($LASTEXITCODE -eq 0 -and (Test-Path "$env:TEMP\solan_dm_empty.o")) {
+    if (-not (Test-Path "$dmPath.orig")) { Copy-Item $dmPath "$dmPath.orig" -Force }
+    Copy-Item "$env:TEMP\solan_dm_empty.o" $dmPath -Force
+    Write-Host "✓ عُطِّل default-manifest.o المدمج في المترجم (كان يتعارض مع manifest سولان)" -ForegroundColor DarkGray
+  }
+}
 
 # ---------- 2) ملف الموارد (أيقونة + معلومات الإصدار + بيان Manifest) ----------
 $manifest = @"
@@ -74,32 +91,30 @@ $rc = @"
 1 VERSIONINFO
 FILEVERSION     1,1,0,0
 PRODUCTVERSION  1,1,0,0
-FILEOS          VOS_NT_WINDOWS32
-FILETYPE        VFT_APP
+FILEOS          0x40004L
+FILETYPE        0x1L
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName",      "Solan Project"
-      VALUE "FileDescription",  "سولان — لغة برمجة عربية (نسخة ويندوز الأصلية)"
+      VALUE "FileDescription",  "Solan - Arabic Programming Language (Native Windows Build)"
       VALUE "FileVersion",      "$VER"
       VALUE "InternalName",     "solan"
-      VALUE "LegalCopyright",   "MIT-style License - Solan Project"
+      VALUE "LegalCopyright",   "Solan Project"
       VALUE "OriginalFilename", "solan.exe"
       VALUE "ProductName",      "Solan"
       VALUE "ProductVersion",   "$VER"
     END
   END
-  BLOCK "VariableInfo" { }
 END
+1 ICON "solan.ico"
 1 24 "solan.manifest"
 "@
-# ملاحظة: إن وُجدت أيقونة تُضاف سطر: 1 ICON "solan.ico"
-if (Test-Path "pc\solan.ico") { $rc = $rc -replace '1 24 "solan.manifest"', "1 ICON `"solan.ico`"`r`n1 24 `"solan.manifest`"" }
 Set-Content -Path "pc\solan.rc" -Value $rc -Encoding ASCII
 
-& windres "pc\solan.rc" -O coff -o "pc\solan.res" -I pc
+& windres "pc\solan.rc" -O coff -o "pc\solan_res.o" -I pc
 if ($LASTEXITCODE -ne 0) { throw "فشل تجميع الموارد (windres)" }
 
 # ---------- 3) التجميع بأقصى تحسين ----------
@@ -109,12 +124,22 @@ $exe = if ($V3) { "$OUT\solan-v3.exe" } else { "$OUT\solan.exe" }
 
 Write-Host "▸ تجميع سولان (استهداف $arch، ربط ثابت، LTO)..." -ForegroundColor Cyan
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-& gcc solan.c "pc\solan.res" -o $exe `
+# تضمين SQLite إن وُجد الملف المصدر (مثل install.sh)
+$embedDef = ""; $embedObj = @()
+if (Test-Path "third_party\sqlite\sqlite3.c") {
+  Write-Host "  ▸ تضمين SQLite..."
+  & gcc -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -c -o "third_party\sqlite\sqlite3.o" "third_party\sqlite\sqlite3.c"
+  if ($LASTEXITCODE -ne 0) { throw "فشل تجميع SQLite" }
+  $embedDef = "-DSOLAN_SQLITE_EMBED"
+  $embedObj = @("third_party\sqlite\sqlite3.o")
+}
+& gcc solan.c "pc\solan_res.o" @embedObj -o $exe `
+  $embedDef `
   -O3 -flto=auto -fno-ident -fno-math-errno `
   "-march=$arch" -mtune=generic `
   -ffunction-sections -fdata-sections -fvisibility=hidden `
   -static -static-libgcc `
-  -Wl,--gc-sections -Wl,-O2 -Wl,--as-needed $strip `
+  "-Wl,--gc-sections" "-Wl,-O2" "-Wl,--as-needed" $strip `
   -D_WIN32_WINNT=0x0A00 `
   -lws2_32 -lshell32 -ladvapi32 -lm
 if ($LASTEXITCODE -ne 0) { throw "فشل التجميع" }
@@ -127,16 +152,17 @@ Write-Host "✓ الناتج: $exe ($size MB)" -ForegroundColor Green
 # ---------- 4) فحص سريع ----------
 & $exe --version
 if ($LASTEXITCODE -ne 0) { throw "الملف التنفيذي لا يعمل" }
-& $exe -e 'اطبع("سولان على ويندوز يعمل ✓")'
+& $exe pc\هلا.سو
+if ($LASTEXITCODE -ne 0) { throw "فشل تنفيذ برنامج تجريبي" }
 
 # ---------- 5) المُثبِّت ----------
 if ($Installer) {
   Write-Host "▸ بناء المُثبِّت (Inno Setup)..." -ForegroundColor Cyan
-  $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   if (-not $iscc) {
     Write-Host "  تثبيت Inno Setup..." 
     winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
-    $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   }
   if (-not $iscc) { Write-Host "✗ لم أجد ISCC.exe — ثبّت Inno Setup يدوياً" -ForegroundColor Yellow; exit 1 }
   & $iscc "pc\installer.iss" /DExeName=$exe
@@ -146,3 +172,4 @@ if ($Installer) {
 
 Write-Host ""
 Write-Host "تم! جرّب:  $($exe.Replace((Get-Location).Path + '\','')) هلا.سو" -ForegroundColor Yellow
+exit 0

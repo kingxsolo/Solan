@@ -1,0 +1,23 @@
+1 VERSIONINFO
+FILEVERSION     1,1,0,0
+PRODUCTVERSION  1,1,0,0
+FILEOS          0x40004L
+FILETYPE        0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "Solan Project"
+      VALUE "FileDescription",  "Solan - Arabic Programming Language (Native Windows Build)"
+      VALUE "FileVersion",      "1.1.0"
+      VALUE "InternalName",     "solan"
+      VALUE "LegalCopyright",   "Solan Project"
+      VALUE "OriginalFilename", "solan.exe"
+      VALUE "ProductName",      "Solan"
+      VALUE "ProductVersion",   "1.1.0"
+    END
+  END
+END
+1 ICON "solan.ico"
+1 24 "solan.manifest"

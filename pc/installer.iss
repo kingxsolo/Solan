@@ -34,7 +34,8 @@ WizardStyle=modern
 ChangesEnvironment=yes
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog commandline
 CloseApplications=yes
 SetupLogging=yes
 
@@ -64,7 +65,7 @@ Name: "{autodesktop}\سولان"; Filename: "{app}\solan.exe"; Tasks: desktopico
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "أيقونات:"
 Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"; Flags: checkedonce
 Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: unchecked
-Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked oncechecked
+Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\.solan"; Flags: uninsdeletekey; Tasks: assoc
@@ -85,42 +86,72 @@ Filename: "{app}\README-PC.md"; Description: "{cm:OpenReadme}"; Flags: postinsta
 // إضافة مجلد التثبيت إلى PATH الخاص بالمستخدم
 procedure EnvAddPath(Path: string);
 var
-  Paths: string;
-  I: Integer;
-  Parts: TArray<string>;
+  Paths, Remaining, Part: string;
+  Found: Boolean;
 begin
-  RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths);
-  Parts := Paths.Split([';']);
-  for I := 0 to Length(Parts) - 1 do
-    if CompareText(Trim(Parts[I]), Path) = 0 then Exit;
-  if (Length(Paths) > 0) and (Paths[Length(Paths)] <> ';') then
-    Paths := Paths + ';';
-  Paths := Paths + Path;
-  RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths);
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then
+    Paths := '';
+  Found := False;
+  Remaining := Paths;
+  while Length(Remaining) > 0 do
+  begin
+    if Pos(';', Remaining) > 0 then
+    begin
+      Part := Copy(Remaining, 1, Pos(';', Remaining) - 1);
+      Remaining := Copy(Remaining, Pos(';', Remaining) + 1, MaxInt);
+    end
+    else
+    begin
+      Part := Remaining;
+      Remaining := '';
+    end;
+    if CompareText(Trim(Part), Path) = 0 then
+      Found := True;
+  end;
+  if not Found then
+  begin
+    if (Length(Paths) > 0) and (Paths[Length(Paths)] <> ';') then
+      Paths := Paths + ';';
+    Paths := Paths + Path;
+    RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths);
+  end;
 end;
 
 procedure EnvRemovePath(Path: string);
 var
-  Paths, NewPaths: string;
-  I: Integer;
-  Parts: TArray<string>;
+  Paths, Remaining, Part, NewPaths: string;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then Exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then
+    Exit;
   NewPaths := '';
-  Parts := Paths.Split([';']);
-  for I := 0 to Length(Parts) - 1 do
-    if (CompareText(Trim(Parts[I]), Path) <> 0) and (Trim(Parts[I]) <> '') then
+  Remaining := Paths;
+  while Length(Remaining) > 0 do
+  begin
+    if Pos(';', Remaining) > 0 then
     begin
-      if NewPaths <> '' then NewPaths := NewPaths + ';';
-      NewPaths := NewPaths + Trim(Parts[I]);
+      Part := Copy(Remaining, 1, Pos(';', Remaining) - 1);
+      Remaining := Copy(Remaining, Pos(';', Remaining) + 1, MaxInt);
+    end
+    else
+    begin
+      Part := Remaining;
+      Remaining := '';
     end;
+    Part := Trim(Part);
+    if (CompareText(Part, Path) <> 0) and (Part <> '') then
+    begin
+      if NewPaths <> '' then
+        NewPaths := NewPaths + ';';
+      NewPaths := NewPaths + Part;
+    end;
+  end;
   RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPaths);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
-    if IsTaskSelected('addpath') then
+    if WizardIsTaskSelected('addpath') then
       EnvAddPath(ExpandConstant('{app}'));
 end;
 

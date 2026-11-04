@@ -21,4 +21,6 @@ third_party/sqlite/*.o
 /dist/
 /tools/
 pc/solan.res
+pc/solan_res.o
 pc/*.res
+pc/*.o

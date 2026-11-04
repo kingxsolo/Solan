@@ -16,7 +16,7 @@ typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ
 
 static jmp_buf g_fj_jb;
 static int g_fj_depth, g_fj_limit;
-static void fj_bail(void) { _longjmp(g_fj_jb, 1); }
+static void fj_bail(void) { longjmp(g_fj_jb, 1); }
 
 typedef struct { const uint8_t *ip; uint8_t op; int a; int len; int tgt; } FI;
 typedef struct { uint8_t kind; double imm; int ref; } FV;
@@ -329,7 +329,7 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
   double a[FJ_MAXARGS];
   for (int i = 0; i < argc; i++) { if (!IS_NUM(args[i])) return false; a[i] = args[i].as.n; }
   g_fj_depth = 0; g_fj_limit = vm.frames_max - vm.fcount - 4; if (g_fj_limit < 16) return false;
-  if (_setjmp(g_fj_jb)) { fj->bails++; return false; }
+  if (setjmp(g_fj_jb)) { fj->bails++; return false; }
   double r;
   switch (argc) {
     case 0: r = ((double (*)(void))fj->entry)(); break;

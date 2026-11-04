@@ -185,13 +185,25 @@ static int os_rm_file(const char *p) { return unlink(p); }
 #ifndef SIGALRM
 #define SIGALRM 14
 #endif
+#ifndef SIGTERM
+#define SIGTERM 15
+#endif
 #ifndef SIGCHLD
 #define SIGCHLD 17
 #endif
+/* strcasestr غير موجودة على ويندوز */
+static char *w_strcasestr(const char *h, const char *n) {
+  if (!n || !*n) return (char *)h;
+  size_t nl = strlen(n);
+  for (; *h; h++) if (strncasecmp(h, n, nl) == 0) return (char *)h;
+  return NULL;
+}
+#define strcasestr(a, b) w_strcasestr(a, b)
 #define MSG_NOSIGNAL 0
 #define RTLD_NOW 0
 #define RTLD_LAZY 0
 #define RTLD_GLOBAL 0
+#define RTLD_LOCAL 0
 #define RTLD_DEFAULT ((void *)0)
 #ifndef F_GETFL
 #define F_GETFL 3
@@ -473,6 +485,8 @@ static int os_mkstemp(char *tmpl) {
   wchar_t *w = w_utf16(tmpl); int fd = _wopen(w, _O_RDWR | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE); free(w); return fd;
 }
 static void os_ignore_sigpipe(void) {}
+/* تهيئة WinSock مبكراً: بعض المسارات (مثل getaddrinfo في جلب HTTP) لا تمر عبر w_socket */
+static void os_early_wsa(void) { w_wsa(); }
 /* تعويض mallopt الخاص بلينكس + تحسين كومة الذاكرة على ويندوز (كومة منخفضة التجزؤ) */
 #define mallopt(a, b) 0
 #ifndef M_MMAP_THRESHOLD

@@ -10,7 +10,7 @@ Set-Location $PSScriptRoot
 Write-Host "سولان — بناء نسخة ويندوز الأصلية" -ForegroundColor Cyan
 
 # 1) المترجم المحمول (مرة واحدة فقط)
-$gcc = "C:\Solan-PC\tools\winlibs\mingw64\bin\gcc.exe"
+$gcc = "C:\Solan-PC\tools\mingw64\bin\gcc.exe"
 if (-not (Test-Path $gcc)) {
   & powershell -ExecutionPolicy Bypass -File "pc\get-compiler.ps1"
   if (-not (Test-Path $gcc)) { throw "تعذّر تجهيز المترجم" }

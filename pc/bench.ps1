@@ -1,9 +1,10 @@
 # قياس أداء سولان ويندوز مقابل بايثون وNode.js
 # الاستعمال: powershell -File pc\bench.ps1 [مسار solan.exe]
-param([string]$SolanExe = "..\dist\solan.exe")
+param([string]$SolanExe = "")
 $ErrorActionPreference = "Continue"
-$solan = (Resolve-Path $SolanExe -ErrorAction SilentlyContinue).Path
-if (-not $solan) { $solan = (Resolve-Path ".\solan.exe").Path }
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+if (-not $SolanExe) { $SolanExe = Join-Path $scriptDir "..\dist\solan.exe" }
+$solan = (Resolve-Path $SolanExe -ErrorAction Stop).Path
 Write-Host "=== قياس الأداء: $solan ===" -ForegroundColor Cyan
 
 # --- 1) حلقة حسابية كثيفة (JIT) ---
@@ -18,7 +19,7 @@ $f = "$env:TEMP\bench_fib.سو"
 [IO.File]::WriteAllText($f, $solFib, [Text.UTF8Encoding]::new($false))
 
 $t = [System.Diagnostics.Stopwatch]::StartNew()
-$r = & $solan $f
+$r = (& $solan $f 2>&1 | Out-String).Trim()
 $t.Stop()
 $solMs = $t.Elapsed.TotalMilliseconds
 Write-Output ("سولان  فيب(27) = {0}  في {1} م.ث" -f $r, [math]::Round($solMs, 1))
@@ -59,7 +60,7 @@ $solLoop = @'
 $f2 = "$env:TEMP\bench_loop.سو"
 [IO.File]::WriteAllText($f2, $solLoop, [Text.UTF8Encoding]::new($false))
 $t = [System.Diagnostics.Stopwatch]::StartNew()
-$r = & $solan $f2
+$r = (& $solan $f2 2>&1 | Out-String).Trim()
 $t.Stop()
 Write-Output ("سولان  حلقة 10م = {0}  في {1} م.ث" -f $r, [math]::Round($t.Elapsed.TotalMilliseconds, 1))
 
