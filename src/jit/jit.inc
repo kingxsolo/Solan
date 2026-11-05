@@ -39,7 +39,7 @@ typedef struct { int pos, lab; } JF;
 typedef struct { const uint8_t *ip; int depth; int lab; int code; } JX;
 enum { SK_MEM, SK_XMM, SK_VAR, SK_CONST, SK_HOME };
 typedef struct { uint8_t k, r, n; int8_t hb; int hd; int var; uint64_t bits; } SD;
-typedef struct { int g, idx, gi, uses, ok, reg; } PV;
+typedef struct { int g, idx, gi, uses, ok, reg, noc; } PV; /* noc: سلوت مُنشأ داخل المنطقة — بلا فحص وسم عند الدخول */
 typedef struct { int lab, n; SD *s; const uint8_t *ip; } JS;
 
 typedef struct {
@@ -511,10 +511,33 @@ static void jc_promote(JC *c) {
       gi = dfind(dd, OBJV(nm), nm->hash); if (gi < 0) continue; g = 1; idx = gi;
     } else continue;
     int f = -1; for (int k = 0; k < nc; k++) if (cand[k].g == g && cand[k].idx == idx) { f = k; break; }
-    if (f < 0) { if (nc >= 64) continue; f = nc++; cand[f].g = g; cand[f].idx = idx; cand[f].gi = gi; cand[f].uses = 0; cand[f].ok = 1; cand[f].reg = 0;
+    if (f < 0) { if (nc >= 64) continue; f = nc++; cand[f].g = g; cand[f].idx = idx; cand[f].gi = gi; cand[f].uses = 0; cand[f].ok = 1; cand[f].reg = 0; cand[f].noc = 0;
       Value v = g ? c->clo->globals->d.e[gi].v : c->slots[idx];
       cand[f].ok = IS_NUM(v); }
     cand[f].uses++;
+  }
+  /* مرشحو حلقة المدى: آلية الحلقة (العدّاد/العدد/أ) بوسوم صحيحة من خارج المنطقة، ووجهات القيم (سلوتات تُنشأ داخلها — بلا فحص وسم عند الدخول) */
+  for (int i = 0; i < c->n; i++) {
+    if (!c->reach[i]) continue;
+    JI *in = &c->ins[i];
+    if (in->op != OP_RFOR) continue;
+    int d = c->depth[i], base = in->a, flag = in->b, nvr = in->c;
+    int mach[3], nm = 0;
+    mach[nm++] = flag ? base + 2 : base + 1; /* العدّاد */
+    mach[nm++] = flag ? base + 1 : base + 0; /* العدد */
+    if (flag) mach[nm++] = base;             /* أ */
+    for (int m = 0; m < nm; m++) {
+      int idx = mach[m], f = -1;
+      for (int k = 0; k < nc; k++) if (!cand[k].g && cand[k].idx == idx) { f = k; break; }
+      if (f < 0) { if (nc >= 64) continue; f = nc++; cand[f].g = 0; cand[f].idx = idx; cand[f].gi = 0; cand[f].uses = 0; cand[f].reg = 0; cand[f].noc = 0; cand[f].ok = IS_NUM(c->slots[idx]); }
+      cand[f].uses += 100;
+    }
+    for (int k = 0; k < nvr; k++) {
+      int idx = c->spoff + d + k, f = -1; /* العمق d+k يوافق السلوت المحلي spoff+d+k (R12 = RBX + spoff*16) */
+      for (int q = 0; q < nc; q++) if (!cand[q].g && cand[q].idx == idx) { f = q; break; }
+      if (f < 0) { if (nc >= 64) continue; f = nc++; cand[f].g = 0; cand[f].idx = idx; cand[f].gi = 0; cand[f].uses = 0; cand[f].reg = 0; cand[f].noc = 1; cand[f].ok = 1; }
+      cand[f].uses += 50;
+    }
   }
   for (int k = 0; k < nc; k++) if (!cand[k].ok) { cand[k] = cand[nc - 1]; nc--; k--; }
   for (int a = 0; a < nc; a++) for (int b = a + 1; b < nc; b++) if (cand[b].uses > cand[a].uses) { PV t = cand[a]; cand[a] = cand[b]; cand[b] = t; }
@@ -530,7 +553,7 @@ static void jc_promote(JC *c) {
       switch ((Op)in->op) {
         case OP_CONST: ty[d] = IS_NUM(kc[in->a]); break;
         case OP_NIL: case OP_TRUE: case OP_FALSE: case OP_GET_UPV: ty[d] = 0; break;
-        case OP_GET_LOCAL: { int k = in->a < c->spoff ? jc_find_pv(c, 0, in->a) : -1; ty[d] = k >= 0 && c->pv[k].ok; break; }
+        case OP_GET_LOCAL: { int k = jc_find_pv(c, 0, in->a); ty[d] = k >= 0 && c->pv[k].ok; break; }
         case OP_GET_GLOBAL: {
           Str *nm = AS_STR(kc[in->a]); int gi = dfind(&c->clo->globals->d, OBJV(nm), nm->hash);
           int k = gi >= 0 ? jc_find_pv(c, 1, gi) : -1; ty[d] = k >= 0 && c->pv[k].ok; break;
@@ -539,7 +562,7 @@ static void jc_promote(JC *c) {
         case OP_DUP2: ty[d] = ty[d - 2]; ty[d + 1] = ty[d - 1]; break;
         case OP_SET_LOCAL: case OP_SET_GLOBAL: {
           int k;
-          if (in->op == OP_SET_LOCAL) k = in->a < c->spoff ? jc_find_pv(c, 0, in->a) : -1;
+          if (in->op == OP_SET_LOCAL) k = jc_find_pv(c, 0, in->a);
           else { Str *nm = AS_STR(kc[in->a]); int gi = dfind(&c->clo->globals->d, OBJV(nm), nm->hash); k = gi >= 0 ? jc_find_pv(c, 1, gi) : -1; }
           if (k >= 0 && c->pv[k].ok && ty[d - 1] != 1) { c->pv[k].ok = 0; changed = 1; }
           break;
@@ -608,7 +631,7 @@ static void jc_gen_body(JC *c) {
       }
       case OP_GET_LOCAL: case OP_GET_GLOBAL: {
         int k = -1;
-        if (in->op == OP_GET_LOCAL) { if (in->a < c->spoff) k = jc_find_pv(c, 0, in->a); }
+        if (in->op == OP_GET_LOCAL) k = jc_find_pv(c, 0, in->a);
         else { Str *nm = AS_STR(c->fn->ch.consts.v[in->a]); int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
         if (k >= 0) { c->sd[d] = sd_mk(SK_VAR); c->sd[d].r = (uint8_t)c->pv[k].reg; c->sd[d].var = k; break; }
         int b, dd;
@@ -634,7 +657,7 @@ static void jc_gen_body(JC *c) {
       }
       case OP_SET_LOCAL: case OP_SET_GLOBAL: {
         int k = -1, gi = -1;
-        if (in->op == OP_SET_LOCAL) { if (in->a < c->spoff) k = jc_find_pv(c, 0, in->a); }
+        if (in->op == OP_SET_LOCAL) k = jc_find_pv(c, 0, in->a);
         else { Str *nm = AS_STR(c->fn->ch.consts.v[in->a]); gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
         if (k >= 0) {
           jc_need_num(c, i, d, d - 1);
@@ -792,25 +815,46 @@ static void jc_gen_body(JC *c) {
         break;
       }
       case OP_RFOR: {
-        /* حلقة المدى المتخصصة: عدّاد صحيح من 0 حتى العدد، القيمة = أ + العدّاد — بلا فحوص نوع */
+        /* حلقة المدى المتخصصة: عدّاد من 0 حتى العدد، القيمة = أ + العدّاد — عند الترقية كل شيء في سجلات pv بلا ذاكرة لكل تكرار */
         jc_canon(c, 0, d);
         int base = in->a, flag = in->b, nvr = in->c;
         int coff = flag ? 40 : 24, loff = flag ? 24 : 8; /* بايت: داخل كل سلوت 16 بايت الوسم عند +0 والعدد عند +8 */
+        int ck = jc_find_pv(c, 0, flag ? base + 2 : base + 1); /* العدّاد */
+        int lk = jc_find_pv(c, 0, flag ? base + 1 : base + 0); /* العدد */
+        int ak = flag ? jc_find_pv(c, 0, base) : -1;           /* أ */
         int ex = jc_jump_label(c, in, d, 0);
-        jx_movsd_rm(x, 3, RBX, base * 16 + coff);                                  /* XMM3 = العدّاد */
-        jx_rm(x, 0x66, 0, 0x0F2E, 3, RBX, -1, 0, base * 16 + loff);                /* ucomisd العدّاد، العدد */
-        jc_jcc(c, CC_AE, ex);                                                      /* انتهى → خروج (NaN مستحيل: RFOREP يصفّر العدد) */
-        jx_mov_ri(x, RAX, 0x3FF0000000000000ull); jx_movq_xr(x, 2, RAX);           /* XMM2 = 1.0 */
-        jx_movaps(x, 4, 3); jx_addsd(x, 4, 2); jx_movsd_mr(x, RBX, base * 16 + coff, 4); /* العدّاد += 1 (في XMM4) */
-        int vx = 3;                                                                 /* سجل القيمة = العدّاد (flag=0) */
-        if (flag) { jx_movsd_rm(x, 4, RBX, base * 16 + 8); jx_addsd(x, 4, 3); vx = 4; } /* القيمة = أ + العدّاد (بالعدّاد القديم) */
-        if (nvr == 2) {
-          jx_movsd_mr(x, R12, d * 16 + 8, 3); jc_settag(c, d, V_NUM);              /* ي = الفهرس = العدّاد */
-          jx_movsd_mr(x, R12, (d + 1) * 16 + 8, vx); jc_settag(c, d + 1, V_NUM);   /* ت = القيمة */
+        int cold; /* السجل الحامل للعدّاد القديم */
+        if (ck >= 0) {
+          cold = c->pv[ck].reg;
+          if (lk >= 0) jx_ucomisd(x, cold, c->pv[lk].reg);
+          else jx_rm(x, 0x66, 0, 0x0F2E, cold, RBX, -1, 0, base * 16 + loff);
         } else {
-          jx_movsd_mr(x, R12, d * 16 + 8, vx); jc_settag(c, d, V_NUM);             /* ي = القيمة */
+          jx_movsd_rm(x, 3, RBX, base * 16 + coff); cold = 3; /* XMM3 = العدّاد */
+          if (lk >= 0) jx_ucomisd(x, 3, c->pv[lk].reg);
+          else jx_rm(x, 0x66, 0, 0x0F2E, 3, RBX, -1, 0, base * 16 + loff);
         }
-        for (int k = 0; k < nvr; k++) c->sd[d + k] = sd_mk(SK_MEM);
+        jc_jcc(c, CC_AE, ex); /* انتهى → خروج (NaN مستحيل: RFOREP يصفّر العدد) */
+        int vx = cold;        /* القيمة = العدّاد القديم (flag=0) */
+        if (flag) {           /* القيمة = أ + العدّاد القديم → XMM4 */
+          if (ak >= 0) jx_movaps(x, 4, c->pv[ak].reg);
+          else jx_movsd_rm(x, 4, RBX, base * 16 + 8);
+          jx_addsd(x, 4, cold); vx = 4;
+        }
+        /* كتابة الوجهات: nv=2 → ي=الفهرس (العدّاد القديم) ثم ت=القيمة؛ nv=1 → ي=القيمة */
+        for (int k = 0; k < nvr; k++) {
+          int src = (nvr == 2 && k == 0) ? cold : vx;
+          int dk = jc_find_pv(c, 0, c->spoff + d + k);
+          if (dk >= 0) {
+            jx_movaps(x, c->pv[dk].reg, src);
+            c->sd[d + k] = sd_mk(SK_VAR); c->sd[d + k].r = (uint8_t)c->pv[dk].reg; c->sd[d + k].var = dk;
+          } else {
+            jx_movsd_mr(x, R12, (d + k) * 16 + 8, src); jc_settag(c, d + k, V_NUM);
+            c->sd[d + k] = sd_mk(SK_MEM);
+          }
+        }
+        /* زيادة العدّاد: في سجله عند الترقية وإلا في الذاكرة (عبر مجمع الثوابت) */
+        if (ck >= 0) jc_rip(c, 0xF2, 0x0F58, c->pv[ck].reg, jc_pool(c, 0x3FF0000000000000ull));
+        else { jc_rip(c, 0xF2, 0x0F58, 3, jc_pool(c, 0x3FF0000000000000ull)); jx_movsd_mr(x, RBX, base * 16 + coff, 3); }
         break;
       }
       default: c->failed = 1; c->why = "op"; break;
@@ -869,8 +913,12 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
       jx_mov_rr(x, R13, RDI);
     }
     jx_lea(x, RAX, RBX, -1, 0, c->spoff * 16); jx_cmp_rr(x, RAX, R12); jc_jcc(c, CC_NE, fail);
-    for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); jx_cmp32_mi(x, b, d, V_NUM); jc_jcc(c, CC_NE, fail); }
-    for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); jx_movsd_rm(x, c->pv[k].reg, b, d + 8); }
+    for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); if (c->pv[k].noc && !c->pv[k].g) continue; jx_cmp32_mi(x, b, d, V_NUM); jc_jcc(c, CC_NE, fail); }
+    for (int k = 0; k < c->npv; k++) {
+      int b, d; jc_pv_home(&c->pv[k], &b, &d);
+      if (c->pv[k].noc && !c->pv[k].g) jx_mov32_mi(x, b, d, V_NUM); /* سلوت مُنشأ داخل المنطقة: وسمه قد يكون قديماً — يُكتب V_NUM مرة واحدة هنا (قبل أي تفريغ) */
+      jx_movsd_rm(x, c->pv[k].reg, b, d + 8);
+    }
   }
   jc_jmp(c, lbody);
   for (int k = 0; k < c->nsx; k++) {
