@@ -34,7 +34,8 @@ static void jit_free_regions(Fun *f) {
 #define VAR_LO 8
 /* مساحة الحفظ تُعرَّف داخل jit_compile حسب المنصة (JX_SAVE_AREA) */
 
-typedef struct { const uint8_t *ip; uint8_t op; int a, b, c; int len; int tgt; const uint8_t *tip; } JI;
+/* pf: مجمع ثوابت المستدعى المُدرج (NULL = ثوابت المنطقة) — rd: فهرس تعليمة إعادة توجيه التخفي (-1 = بلا) */
+typedef struct { const uint8_t *ip; uint8_t op; int a, b, c; int len; int tgt; const uint8_t *tip; Fun *pf; int rd; } JI;
 typedef struct { int pos, lab; } JF;
 typedef struct { const uint8_t *ip; int depth; int lab; int code; } JX;
 enum { SK_MEM, SK_XMM, SK_VAR, SK_CONST, SK_HOME };
@@ -49,12 +50,12 @@ typedef struct {
   XB x; int lpos[JMAXLAB]; int nlab; JF fix[JMAXFIX]; int nfix;
   JX ex[JMAXI * 2]; int nex;
   int dl[JMAXI];
-  Str *gnames[JMAXV]; int ggi[JMAXV]; int ng;
+  Str *gnames[JMAXV]; int ggi[JMAXV]; Closure *gexp[JMAXV]; int ng; /* gexp: قيمة عام متوقعة لمستدعٍ مُدرج (NULL = بلا حراسة قيمة) */
   JS *sx; int nsx, csx;
   PV pv[64]; int npv; int usepromo; int spoff;
   SD sd[JMAXD + 8];
   uint64_t pool[JMAXPOOL]; int poollab[JMAXPOOL]; int npool;
-  int failed; const char *why;
+  int failed; int ninl; const char *why;
 } JC;
 
 #define EM(p) R12, (int)((p) * 16)
@@ -86,14 +87,17 @@ static int sd_eq(const SD *a, const SD *b) {
   return a->k == b->k && a->r == b->r && a->n == b->n && a->hb == b->hb && a->hd == b->hd && a->var == b->var && a->bits == b->bits;
 }
 static int jc_deopt(JC *c, int i, int depth) {
+  JI *in = &c->ins[i];
+  const uint8_t *sip = in->ip; int sdep = depth;
+  if (in->rd >= 0) { sip = c->ins[in->rd].ip; sdep = c->depth[in->rd]; } /* تعليمات جسم مُدرج: تُخفي إلى ip/عمق الاستدعاء الأصلي */
   if (c->dl[i] >= 0) {
-    JS *o = &c->sx[c->dl[i]]; int same = o->n == depth;
-    for (int k = 0; same && k < depth; k++) if (!sd_eq(&o->s[k], &c->sd[k])) same = 0;
+    JS *o = &c->sx[c->dl[i]]; int same = o->n == sdep;
+    for (int k = 0; same && k < sdep; k++) if (!sd_eq(&o->s[k], &c->sd[k])) same = 0;
     if (same) return o->lab;
   }
   if (c->nsx == c->csx) { c->csx = c->csx ? c->csx * 2 : 256; c->sx = realloc(c->sx, (size_t)c->csx * sizeof(JS)); }
-  JS *s = &c->sx[c->nsx]; s->lab = jc_new_label(c); s->n = depth; s->ip = c->ins[i].ip;
-  s->s = malloc((size_t)(depth + 1) * sizeof(SD)); memcpy(s->s, c->sd, (size_t)depth * sizeof(SD));
+  JS *s = &c->sx[c->nsx]; s->lab = jc_new_label(c); s->n = sdep; s->ip = sip;
+  s->s = malloc((size_t)(sdep + 1) * sizeof(SD)); memcpy(s->s, c->sd, (size_t)sdep * sizeof(SD));
   c->dl[i] = c->nsx++;
   return s->lab;
 }
@@ -127,9 +131,13 @@ static int jc_effect(JC *c, JI *in, int *pop, int *push) {
     case OP_FOREACH: *push = in->b; return 1;
     case OP_RFOREP: *pop = 0; return 1;
     case OP_RFOR: *push = in->c; return 1;
+    case OP_CALL: *pop = in->a + 1; *push = 1; return 1; /* المستدعى + الوسائط ← النتيجة */
+    case OP_JMOVE: *pop = in->a + 1; *push = 1; return 1; /* انهيار إطار مُدرج: انسخ القمة إلى d-1-k */
     default: (void)c; return 0;
   }
 }
+
+static int jc_flow(JC *c);
 
 static int jc_analyze(JC *c) {
   const uint8_t *code = c->fn->ch.code;
@@ -144,7 +152,7 @@ static int jc_analyze(JC *c) {
     in->a = in->b = in->c = 0;
     switch ((Op)in->op) {
       case OP_CONST: case OP_GET_GLOBAL: case OP_SET_GLOBAL: case OP_GET_PROP: case OP_CHECK: in->a = (ar[0] << 8) | ar[1]; break;
-      case OP_GET_LOCAL: case OP_SET_LOCAL: case OP_GET_UPV: case OP_SET_UPV: in->a = ar[0]; break;
+      case OP_GET_LOCAL: case OP_SET_LOCAL: case OP_GET_UPV: case OP_SET_UPV: case OP_CALL: in->a = ar[0]; break;
       case OP_JUMP: case OP_JIF: case OP_JIT: case OP_JNN: case OP_JNIL: in->tip = ip + 3 + ((ar[0] << 8) | ar[1]); break;
       case OP_LOOP: in->tip = ip + 3 - ((ar[0] << 8) | ar[1]); break;
       case OP_FOREACH: in->a = ar[0]; in->b = ar[1]; in->tip = ip + 5 + ((ar[2] << 8) | ar[3]); break;
@@ -159,6 +167,12 @@ static int jc_analyze(JC *c) {
   }
   if (ip != c->tail) return 0;
   (void)code;
+  return jc_flow(c);
+}
+
+/* جولة التدفق: أهداف القفز + أعماق المكدس — تُعاد تشغيلها بعد إدراج الأجسام */
+static int jc_flow(JC *c) {
+  for (int i = 0; i < c->n; i++) c->islabel[i] = 0;
   for (int i = 0; i < c->n; i++) {
     JI *in = &c->ins[i];
     if (in->tip) {
@@ -166,7 +180,7 @@ static int jc_analyze(JC *c) {
       if ((in->op == OP_JIF || in->op == OP_JIT) && *in->tip == OP_POP) { int t2 = jc_target_idx(c, in->tip + 1); if (t2 >= 0) c->islabel[t2] = 1; }
     }
   }
-  for (int i = 0; i < c->n; i++) c->depth[i] = -1;
+  for (int i = 0; i < c->n; i++) { c->depth[i] = -1; c->reach[i] = 0; }
   int work[JMAXI * 2], nw = 0;
   c->depth[0] = 0; c->reach[0] = 1; work[nw++] = 0;
   while (nw > 0) {
@@ -195,6 +209,157 @@ static int jc_analyze(JC *c) {
     }
   }
   return 1;
+}
+
+/* ═══════ إدراج أجسام الدوال (inlining) ═══════
+   يستبدل الاستدعاء المباشر لدالة عامة معروفة بجسمها المفكوك فوق الوسائط في مكانها، ثم ينهار
+   المكدس بـ OP_JMOVE. حارس هوية المستدعى (وسم V_OBJ + مؤشر الـ Closure المتوقع) يُرفع إلى
+   مقدمة المنطقة، والمرجع يُثبَّت في vm.pins لمنع إعادة استخدام العنوان (ABA). التخفي داخل
+   الجسم يُعاد توجيهه إلى ip/عمق الاستدعاء الأصلي عبر rd — فيستأنف المفسّر الاستدعاء كما هو. */
+typedef struct { const uint8_t *ip; uint8_t op; int a; uint8_t len; } BOP;
+typedef struct { int ic, d0, argc, blen, b; Fun *pf; BOP *bp; } ISITE;
+#define JMAXSITE 64
+#define JMAXBODY 16
+
+static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *blenout, int *bout) {
+  const uint8_t *ip = pf->ch.code, *end = pf->ch.code + pf->ch.n;
+  int bd = 0, bmax = 0, cnt = 0, b = -1;
+  while (ip < end) {
+    uint8_t op = op_norm(*ip);
+    int len = 1 + op_operand_len(pf, ip);
+    const uint8_t *ar = ip + 1;
+    int a = 0;
+    switch (op) {
+      case OP_CONST: case OP_GET_GLOBAL: case OP_SET_GLOBAL: case OP_GET_PROP: case OP_CHECK: a = (ar[0] << 8) | ar[1]; break;
+      case OP_GET_LOCAL: case OP_SET_LOCAL: case OP_GET_UPV: case OP_SET_UPV: case OP_CALL: a = ar[0]; break;
+      default: break;
+    }
+    if (op == OP_RETURN) {
+      if (bd < 1) return 0; /* بلا قيمة */
+      b = bd; break; /* ما بعد أول رجع غير قابل للوصول (لا قفزات في الجسم) — كالنمط الضمني NIL/RETURN */
+    }
+    switch (op) {
+      case OP_CONST: {
+        if (a >= pf->ch.consts.n) return 0;
+        Value v = pf->ch.consts.v[a];
+        if (!IS_NUM(v) && !IS_T(v, O_STR)) return 0;
+        bd++; break;
+      }
+      case OP_GET_LOCAL: if (a < 1 || a > argc) return 0; bd++; break; /* الوسائط فقط: 0 = المستدعى نفسه مرفوض */
+      case OP_GET_GLOBAL: {
+        if (a >= pf->ch.consts.n || !IS_T(pf->ch.consts.v[a], O_STR)) return 0;
+        Str *nm = AS_STR(pf->ch.consts.v[a]);
+        if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0) return 0; /* عام غير معرَّف بعد */
+        bd++; break;
+      }
+      case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV: bd--; break;
+      case OP_NEG: break;
+      default: return 0;
+    }
+    if (bd < 0) return 0;
+    if (bd > bmax) bmax = bd;
+    if (cnt >= JMAXBODY) return 0;
+    bp[cnt].ip = ip; bp[cnt].op = op; bp[cnt].a = a; bp[cnt].len = (uint8_t)len; cnt++;
+    ip += len;
+  }
+  if (b < 0) return 0; /* بلا رجع */
+  if (D_call + bmax > JMAXD - 5) return 0;
+  *blenout = cnt; *bout = b;
+  return 1;
+}
+
+static void jc_inline(JC *c) {
+  ISITE st[JMAXSITE]; BOP bops[JMAXSITE * JMAXBODY];
+  int ns = 0, nbo = 0, add = 0;
+  Value *kc = c->fn->ch.consts.v;
+  Dict *gd = &c->clo->globals->d;
+  const char *rej = NULL; int ric = -1;
+  /* جولة الفحص: كل المواقع تُدقَّق على المصفوفة الأصلية قبل أي تحريف */
+  for (int ic = 0; ic < c->n; ic++) {
+    if (ns >= JMAXSITE || nbo + JMAXBODY > JMAXSITE * JMAXBODY) break;
+    JI *in = &c->ins[ic];
+    rej = NULL;
+    if (in->op != OP_CALL) continue;
+    ric = ic;
+    if (!c->reach[ic]) rej = "غير مُشمولة";
+    else if (c->islabel[ic]) rej = "وسم قفز";
+    else if (ic + 1 >= c->n) rej = "آخر تعليمة";
+    if (rej) goto rejlog;
+    int argc = in->a, D = c->depth[ic], d0 = D - argc - 1;
+    if (d0 < 0) { rej = "عمق سالب"; goto rejlog; }
+    int j = -1; /* دفع المستدعى: أقرب تعليمة سابقة عند العمق d0 */
+    for (int q = ic - 1; q >= 0; q--) {
+      int dq = c->depth[q];
+      if (dq == d0) { j = q; break; }
+      if (dq < d0) break;
+    }
+    if (j < 0) { rej = "لا دافع"; goto rejlog; }
+    JI *cj = &c->ins[j];
+    if (cj->op != OP_GET_GLOBAL) { rej = "الدافع ليس عاماً"; goto rejlog; }
+    if (cj->a >= c->fn->ch.consts.n || !IS_T(kc[cj->a], O_STR)) { rej = "اسم غير نصي"; goto rejlog; }
+    Str *nm = AS_STR(kc[cj->a]);
+    int gi = dfind(gd, OBJV(nm), nm->hash);
+    if (gi < 0) { rej = "عام مفقود"; goto rejlog; }
+    Value gv = gd->e[gi].v;
+    if (!IS_T(gv, O_CLO)) { rej = "ليس دالة"; goto rejlog; }
+    Fun *pf = AS_CLO(gv)->f;
+    if (!pf || pf->variadic || pf->kind || pf->arity != argc || pf == c->fn) { rej = "توقيع غير مطابق"; goto rejlog; }
+    int dirty = 0; /* لا كتابة لهذا العام داخل المنطقة — وإلا ينكار حارس الهوية أثناء التنفيذ */
+    for (int q = 0; q < c->n && !dirty; q++) {
+      JI *w = &c->ins[q];
+      if (w->op == OP_SET_GLOBAL) { if (w->a < c->fn->ch.consts.n && IS_T(kc[w->a], O_STR) && AS_STR(kc[w->a]) == nm) dirty = 1; }
+      else if (w->op == OP_DEF_GLOBAL && w->ip + 2 < c->tail) {
+        int ci = (w->ip[1] << 8) | w->ip[2];
+        if (ci < c->fn->ch.consts.n && IS_T(kc[ci], O_STR) && AS_STR(kc[ci]) == nm) dirty = 1;
+      }
+    }
+    if (dirty) { rej = "عام مكتوب داخل المنطقة"; goto rejlog; }
+    BOP *bp = &bops[nbo];
+    int blen = 0, b = 0;
+    if (!jc_inline_walk(c, pf, argc, D, bp, &blen, &b)) { rej = "جسم غير مؤهل"; goto rejlog; }
+    int slot = -1; /* تسجيل اسم المستدعى + القيمة المتوقعة + تثبيت المرجع ضد الـ GC */
+    for (int q = 0; q < c->ng; q++) if (c->gnames[q] == nm) { slot = q; break; }
+    if (slot < 0) {
+      jc_global_index(c, nm);
+      if (c->failed) { c->failed = 0; c->why = NULL; rej = "سجل عام"; goto rejlog; }
+      slot = c->ng - 1;
+      pin((Obj *)AS_CLO(gv));
+    }
+    c->gexp[slot] = AS_CLO(gv);
+    nbo += blen; add += blen;
+    st[ns].ic = ic; st[ns].d0 = d0; st[ns].argc = argc; st[ns].blen = blen; st[ns].b = b; st[ns].pf = pf; st[ns].bp = bp;
+    ns++;
+    continue;
+    rejlog:
+    if (g_jit_trace) fprintf(stderr, "[inline] رفض ic=%d عمق=%d: %s\n", ric, c->depth[ric], rej);
+  }
+  if (ns == 0 || c->n + add >= JMAXI) return;
+  /* جولة الإدراج: تصاعدياً؛ كل إدراج يزيح مواقع المواقع الأعلى غير المعالجة فقط */
+  for (int s = 0; s < ns; s++) {
+    int ic = st[s].ic, blen = st[s].blen, argc = st[s].argc, b = st[s].b;
+    Fun *pf = st[s].pf;
+    const uint8_t *call_ip = c->ins[ic].ip;
+    memmove(&c->ins[ic + 1 + blen], &c->ins[ic + 1], (size_t)(c->n - ic - 1) * sizeof(JI));
+    c->n += blen;
+    for (int k = 0; k < blen; k++) {
+      BOP *bo = &st[s].bp[k];
+      JI *ni = &c->ins[ic + k];
+      ni->ip = k == 0 ? call_ip : bo->ip; /* الأولى تحمل ip الاستدعاء: تخفيها الذاتي يصيب الموضع الصحيح */
+      ni->op = bo->op; ni->a = bo->a; ni->b = 0; ni->c = 0; ni->len = bo->len;
+      ni->tgt = -1; ni->tip = NULL;
+      ni->pf = (bo->op == OP_CONST || bo->op == OP_GET_GLOBAL) ? pf : NULL;
+      ni->rd = k == 0 ? -1 : ic;
+    }
+    JI *jm = &c->ins[ic + blen];
+    jm->ip = call_ip; jm->op = OP_JMOVE; jm->a = argc + b; jm->b = 0; jm->c = 0;
+    jm->len = 1; jm->tgt = -1; jm->tip = NULL; jm->pf = NULL; jm->rd = ic;
+    for (int t = s + 1; t < ns; t++) st[t].ic += blen;
+    c->ninl++;
+  }
+  /* إعادة بناء idx_of ثم جولة تدفق جديدة على التسلسل المُدرج */
+  for (int i = 0; i < (int)(c->tail - c->head) + 1; i++) c->idx_of[i] = -1;
+  for (int i = 0; i < c->n; i++) { const uint8_t *p = c->ins[i].ip; if (p >= c->head && p < c->tail) c->idx_of[p - c->head] = i; }
+  if (!jc_flow(c)) { c->failed = 1; c->why = "flow2"; }
 }
 
 static void jc_copyx(JC *c, int db, int di, int dd, int sb, int si, int sdisp) {
@@ -497,6 +662,9 @@ static void jc_store_bool_eax(JC *c, int pos) {
   c->sd[pos] = sd_mk(SK_MEM);
 }
 
+/* ثوابت التعليمة: ثوابت المستدعى المُدرج إن وُجد وإلا ثوابت المنطقة */
+static Value *jc_kc(JC *c, JI *in) { return (in->pf ? in->pf : c->fn)->ch.consts.v; }
+
 static void jc_promote(JC *c) {
   c->npv = 0;
   if (!c->usepromo) return;
@@ -551,11 +719,15 @@ static void jc_promote(JC *c) {
       JI *in = &c->ins[i]; int d = c->depth[i];
       if (c->islabel[i]) memset(ty, 0, sizeof ty);
       switch ((Op)in->op) {
-        case OP_CONST: ty[d] = IS_NUM(kc[in->a]); break;
+        case OP_CONST: ty[d] = IS_NUM(jc_kc(c, in)[in->a]); break;
         case OP_NIL: case OP_TRUE: case OP_FALSE: case OP_GET_UPV: ty[d] = 0; break;
-        case OP_GET_LOCAL: { int k = jc_find_pv(c, 0, in->a); ty[d] = k >= 0 && c->pv[k].ok; break; }
+        case OP_GET_LOCAL: {
+          int k = jc_find_pv(c, 0, in->a); ty[d] = k >= 0 && c->pv[k].ok;
+          if (in->pf && k < 0 && in->a >= c->spoff) { int p = in->a - c->spoff; if (p >= 0 && p < d) ty[d] = ty[p]; } /* وسيط مُدرج يرث نوع موقعه */
+          break;
+        }
         case OP_GET_GLOBAL: {
-          Str *nm = AS_STR(kc[in->a]); int gi = dfind(&c->clo->globals->d, OBJV(nm), nm->hash);
+          Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = dfind(&c->clo->globals->d, OBJV(nm), nm->hash);
           int k = gi >= 0 ? jc_find_pv(c, 1, gi) : -1; ty[d] = k >= 0 && c->pv[k].ok; break;
         }
         case OP_DUP: ty[d] = ty[d - 1]; break;
@@ -576,6 +748,11 @@ static void jc_promote(JC *c) {
         case OP_SET_INDEX: ty[d - 3] = ty[d - 1]; break;
         case OP_FOREACH: for (int k = 0; k < in->b; k++) ty[d + k] = 0; break;
         case OP_RFOR: for (int k = 0; k < in->c; k++) ty[d + k] = 1; break; /* قيم المدى أرقام دائماً */
+        case OP_JMOVE: { /* انهيار مُدرج: نوع الوجهة = نوع القمة، وما فوقها يموت */
+          int dst = d - 1 - in->a;
+          if (dst >= 0) { ty[dst] = ty[d - 1]; for (int q = dst + 1; q < d; q++) ty[q] = 0; }
+          break;
+        }
         case OP_CHECK: if (in->a & TY_NUM) ty[d - 1] = 1; break;
         default: break;
       }
@@ -605,7 +782,7 @@ static void jc_gen_body(JC *c) {
     c->lpos[i] = x->n;
     switch ((Op)in->op) {
       case OP_CONST: {
-        Value v = c->fn->ch.consts.v[in->a];
+        Value v = jc_kc(c, in)[in->a];
         if (IS_NUM(v)) { c->sd[d] = sd_mk(SK_CONST); memcpy(&c->sd[d].bits, &v.as.n, 8); }
         else if (IS_T(v, O_STR)) { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)v.as.o); jx_mov_mr(x, R12, d * 16 + 8, RAX); jc_settag(c, d, V_OBJ); c->sd[d] = sd_mk(SK_MEM); }
         else { c->failed = 1; c->why = "const"; }
@@ -632,14 +809,14 @@ static void jc_gen_body(JC *c) {
       case OP_GET_LOCAL: case OP_GET_GLOBAL: {
         int k = -1;
         if (in->op == OP_GET_LOCAL) k = jc_find_pv(c, 0, in->a);
-        else { Str *nm = AS_STR(c->fn->ch.consts.v[in->a]); int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
+        else { Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
         if (k >= 0) { c->sd[d] = sd_mk(SK_VAR); c->sd[d].r = (uint8_t)c->pv[k].reg; c->sd[d].var = k; break; }
         int b, dd;
         if (in->op == OP_GET_LOCAL) {
           if (in->a >= c->spoff) { int p = in->a - c->spoff; if (p >= d) { c->failed = 1; c->why = "slot"; break; } jc_mat(c, p); }
           jc_local_home(c, in->a, &b, &dd);
         } else {
-          Str *nm = AS_STR(c->fn->ch.consts.v[in->a]); int gi = jc_global_index(c, nm);
+          Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = jc_global_index(c, nm);
           b = R13; dd = gi * (int)sizeof(Ent) + (int)offsetof(Ent, v);
         }
         c->sd[d] = sd_mk(SK_HOME); c->sd[d].hb = (int8_t)b; c->sd[d].hd = dd;
@@ -857,6 +1034,21 @@ static void jc_gen_body(JC *c) {
         else { jc_rip(c, 0xF2, 0x0F58, 3, jc_pool(c, 0x3FF0000000000000ull)); jx_movsd_mr(x, RBX, base * 16 + coff, 3); }
         break;
       }
+      case OP_JMOVE: {
+        /* انهيار إطار مُدرج: انسخ قيمة القمة (d-1) إلى العمق d-1-k — نقل رمزي بصفر تعليمات متى أمكن */
+        int k = in->a, src = d - 1, dst = d - 1 - k;
+        SD s = c->sd[src];
+        switch (s.k) {
+          case SK_XMM: case SK_VAR: case SK_CONST: c->sd[dst] = s; break;
+          case SK_HOME:
+            if (!(s.hb == R12 && s.hd == dst * 16)) jc_copy16(c, R12, dst * 16, s.hb, s.hd);
+            c->sd[dst] = sd_mk(SK_MEM); c->sd[dst].n = s.n; break;
+          default: /* SK_MEM */
+            if (src != dst) jc_copy16(c, R12, dst * 16, R12, src * 16);
+            c->sd[dst] = sd_mk(SK_MEM); c->sd[dst].n = s.n; break;
+        }
+        break;
+      }
       default: c->failed = 1; c->why = "op"; break;
     }
   }
@@ -869,6 +1061,8 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   c->spoff = (int)(sp - slots); c->usepromo = 1;
   c->x.cap = 1 << 20; c->x.p = malloc(c->x.cap);
   if (!jc_analyze(c)) { if (g_jit_trace) fprintf(stderr, "[jit] تحليل فشل: %s\n", c->why ? c->why : "?"); goto out; }
+  jc_inline(c); /* إدراج أجسام الدوال قبل الترقية والتوليد */
+  if (c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] إدراج فشل: %s\n", c->why ? c->why : "?"); goto out; }
   c->nlab = c->n;
   for (int i = 0; i < c->n; i++) { c->lpos[i] = -1; c->dl[i] = -1; }
   jc_promote(c);
@@ -909,6 +1103,14 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
         jx_cmp32_mi(x, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k), V_OBJ); jc_jcc(c, CC_NE, fail);
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gnames[k]);
         jx_cmp_rm(x, RAX, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k) + 8); jc_jcc(c, CC_NE, fail);
+      }
+      /* حراسة قيم المستدعين المُدرجين: وسم V_OBJ ومؤشر الـ Closure المتوقع */
+      for (int k = 0; k < c->ng; k++) {
+        if (!c->gexp[k]) continue;
+        int vo = c->ggi[k] * (int)sizeof(Ent) + (int)offsetof(Ent, v);
+        jx_cmp32_mi(x, RDI, vo, V_OBJ); jc_jcc(c, CC_NE, fail);
+        jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[k]);
+        jx_cmp_rm(x, RAX, RDI, vo + 8); jc_jcc(c, CC_NE, fail);
       }
       jx_mov_rr(x, R13, RDI);
     }
@@ -960,7 +1162,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
     if (mprotect(mem, sz, PROT_READ | PROT_EXEC) != 0) { munmap(mem, sz); g_jit = 0; goto out; }
     res = calloc(1, sizeof(JitRegion));
     res->tail = tail; res->fn = (JitFn)mem; res->mem = mem; res->msz = sz; res->next = fn->jreg; fn->jreg = res; g_jit_bytes += sz;
-    if (g_jit_trace) fprintf(stderr, "[jit] جُمّعت حلقة: %d تعليمة، %d بايت، متغيرات في سجلات: %d\n", c->n, c->x.n, c->npv);
+    if (g_jit_trace) fprintf(stderr, "[jit] جُمّعت حلقة: %d تعليمة، %d بايت، متغيرات في سجلات: %d، إدراج: %d\n", c->n, c->x.n, c->npv, c->ninl);
     const char *dump = getenv("SOLAN_JIT_DUMP");
     if (dump) { FILE *df = fopen(dump, "wb"); if (df) { fwrite(c->x.p, 1, (size_t)c->x.n, df); fclose(df); } }
   }

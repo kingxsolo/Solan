@@ -91,7 +91,8 @@
   X(OP_Q_LL_ADD) \
   X(OP_Q_LL_SUB) \
   X(OP_Q_LL_MUL) \
-  X(OP_Q_SETPOP)
+  X(OP_Q_SETPOP) \
+  X(OP_JMOVE)
 #define X_OPENUM(o) o,
 #define X_LBL(o) &&L_##o,
 typedef enum { OPLIST(X_OPENUM) OP__COUNT } Op;

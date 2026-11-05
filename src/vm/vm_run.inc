@@ -31,6 +31,8 @@ static int run(int base) {
   CASE(OP_SET_LOCAL) frame->slots[READ8()] = PK(0); NEXT();
 
   CASE(OP_Q_SETPOP) { frame->slots[ip[0]] = sp[-1]; sp--; ip += 2; NEXT(); }
+  /* OP_JMOVE تُنشأ داخل JIT المناطق فقط (انهيار إطار مُدرج) ولا تظهر في البايت-كود أبداً */
+  CASE(OP_JMOVE) RT("تعليمة JMOVE الداخلية لا تُنفذ في المفسّر");
   CASE(OP_Q_LL) { PUSHL(frame->slots[ip[0]]); PUSHL(frame->slots[ip[2]]); ip += 3; NEXT(); }
   CASE(OP_Q_LP) {
     Value r = frame->slots[ip[0]];
