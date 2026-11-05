@@ -119,8 +119,18 @@ static int norm_into(const char *s, int n, char *out) {
 static inline uint64_t hb_rd64(const char *p) { uint64_t v; memcpy(&v, p, 8); return v; }
 static inline uint64_t hb_rd32(const char *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static inline uint64_t hb_mix(uint64_t a, uint64_t b) {
+#if defined(__SIZEOF_INT128__)
   __uint128_t m = (__uint128_t)(a ^ 0x9E3779B97F4A7C15ull) * (b ^ 0xD6E8FEB86659FD93ull);
   return (uint64_t)m ^ (uint64_t)(m >> 64);
+#else
+  /* 32-بت: بلا __int128 — ضرب 64×64→128 يدوياً بأطراف 32-بت (نفس جودة الخلط، قيم محلية العملية) */
+  uint64_t alo = (uint32_t)a, ahi = a >> 32, blo = (uint32_t)b, bhi = b >> 32;
+  uint64_t p0 = alo * blo, p1 = alo * bhi, p2 = ahi * blo, p3 = ahi * bhi;
+  uint64_t mid = p1 + (p0 >> 32) + (uint32_t)p2;
+  uint64_t lo = (p0 & 0xFFFFFFFFull) | ((mid & 0xFFFFFFFFull) << 32);
+  uint64_t hi = p3 + (mid >> 32) + (p2 >> 32);
+  return lo ^ hi;
+#endif
 }
 static uint32_t hash_bytes(const char *s, int n) {
   uint64_t h;
