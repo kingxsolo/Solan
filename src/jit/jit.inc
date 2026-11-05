@@ -263,8 +263,15 @@ static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *bl
       case OP_GET_GLOBAL: {
         if (a >= pf->ch.consts.n || !IS_T(pf->ch.consts.v[a], O_STR)) { rej = "اسم عام غير نصي"; goto fail; }
         Str *nm = AS_STR(pf->ch.consts.v[a]);
-        if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0) { rej = "عام غير معرف بعد"; goto fail; }
+        /* عام الجسم يُقبل إن وُجد في عوالم المنطقة أو كان مدمجاً — تعليمته تمرّ بحالة
+           OP_GET_GLOBAL الرئيسية فتُرقّى أو تُقرأ حديثاً من vm.builtins بحارس الظل */
+        if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0 &&
+            dfind(&vm.builtins, OBJV(nm), nm->hash) < 0) { rej = "عام غير معرف بعد"; goto fail; }
         bd++; break;
+      }
+      case OP_CALL: { /* استدعاء داخل الجسم (مدمج غالباً): يُنفَّذ call-out عبر حالة OP_CALL الرئيسية */
+        if (bd < a + 1) { rej = "مكدس سالب"; goto fail; }
+        bd -= a; break; /* المستدعى + الوسائط تُستبدل بالنتيجة */
       }
       case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV:
       case OP_EQ: case OP_LT: case OP_LE: case OP_GT: case OP_GE:
@@ -697,7 +704,7 @@ static void jc_promote(JC *c) {
     JI *in = &c->ins[i]; int g, idx, gi = -1;
     if (in->op == OP_GET_LOCAL || in->op == OP_SET_LOCAL) { if (in->a >= c->spoff) continue; g = 0; idx = in->a; }
     else if (in->op == OP_GET_GLOBAL || in->op == OP_SET_GLOBAL) {
-      Str *nm = AS_STR(kc[in->a]); Dict *dd = &c->clo->globals->d;
+      Str *nm = AS_STR(jc_kc(c, in)[in->a]); Dict *dd = &c->clo->globals->d; /* jc_kc: تعليمة مُدرجة تقرأ مسبار دالتها لا مسبار المنطقة */
       gi = dfind(dd, OBJV(nm), nm->hash); if (gi < 0) continue; g = 1; idx = gi;
     } else continue;
     int f = -1; for (int k = 0; k < nc; k++) if (cand[k].g == g && cand[k].idx == idx) { f = k; break; }
@@ -767,6 +774,7 @@ static void jc_promote(JC *c) {
         case OP_NEG: case OP_GET_PROP: ty[d - 1] = 1; break;
         case OP_NOT: ty[d - 1] = 0; break;
         case OP_GET_INDEX: ty[d - 2] = 0; break;
+        case OP_CALL: ty[d - 1 - in->a] = 0; break; /* نتيجة استدعاء بنوع مجهول — لا ترقية عليها */
         case OP_SET_INDEX: ty[d - 3] = ty[d - 1]; break;
         case OP_FOREACH: for (int k = 0; k < in->b; k++) ty[d + k] = 0; break;
         case OP_RFOR: for (int k = 0; k < in->c; k++) ty[d + k] = 1; break; /* قيم المدى أرقام دائماً */
@@ -1111,12 +1119,17 @@ static void jc_gen_body(JC *c) {
         if (d - 1 - argc < 0) { c->failed = 1; c->why = "call"; break; }
         jc_canon(c, 0, d); /* كل ما تحت القمة إلى الذاكرة: المستدعى والوسائط يُقرأون من المكدس الحقيقي */
         jc_flush_vars(c);  /* قيم السجلات إلى بيوتها قبل الـ GC والاستدعاء */
-        int ex2 = jc_exit_label2(c, in->ip, d - argc, 2);           /* استثناء: بلا تفريغ */
-        int ex3 = jc_exit_label2(c, in->ip + in->len, d - argc, 3); /* تخفي بعد الاستدعاء: المكدس صحيح أصلاً */
+        const uint8_t *cip = in->ip, *rip = in->ip + in->len; int cdep = d - argc;
+        if (in->rd >= 0) { /* استدعاء داخل جسم مُدرج: الأسطر والاستئناف عند موقع الاستدعاء الأصلي —
+          المستدعى والوسائط ما زالت في أماكنها (الجسم يعمل فوقها) فيُعاد تنفيذ الاستدعاء الأصلي كاملاً */
+          cip = rip = c->ins[in->rd].ip; cdep = c->depth[in->rd];
+        }
+        int ex2 = jc_exit_label2(c, cip, cdep, 2); /* استثناء: بلا تفريغ */
+        int ex3 = jc_exit_label2(c, rip, cdep, 3); /* تخفي بعد الاستدعاء: المكدس صحيح */
         jx_mov_rr(x, RCX, R15);
         jx_lea(x, RDX, R12, -1, 0, d * 16);
         jx_mov_ri(x, R8, (uint64_t)argc);
-        jx_mov_ri(x, R9, (uint64_t)(uintptr_t)in->ip);
+        jx_mov_ri(x, R9, (uint64_t)(uintptr_t)cip);
         jc_call_helper(c, (void *)jit_h_call);
         jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
         if (c->ng > 0 || c->nbi > 0) { /* إعادة اشتقاق R13: القاموس قد نما (فحص الجيل يقرأ من R13) */
