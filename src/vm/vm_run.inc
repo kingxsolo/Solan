@@ -269,8 +269,8 @@ static int run(int base) {
       if (!f->variadic && !f->kind && argc == f->arity && vm.fcount < vm.frames_max && sp < vm.stack_end - 600) {
 #if SOLAN_JIT
         if (f->fjst != 2 && g_jit && !vm.dbg_mode && (f->fjst == 1 || (f->fjst == 0 && ++f->fjcnt >= FJ_TH && fj_compile(c)))) {
-          double fjr;
-          if (fj_run(c, sp - argc, argc, &fjr)) { sp -= argc; sp[-1] = NUMV(fjr); NEXT(); }
+          Value fjr;
+          if (fj_run(c, sp - argc, argc, &fjr)) { sp -= argc; sp[-1] = fjr; NEXT(); }
           if (f->fj && f->fj->bails > 6) f->fjst = 2;
         }
 #endif

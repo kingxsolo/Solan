@@ -12,10 +12,11 @@
 enum { FJT_NONE = 0, FJT_NUM = 1, FJT_BOOL = 2, FJT_FN = 3 };
 
 typedef struct FjGuard { Dict *d; int gi; Str *name; Fun *fun; } FjGuard;
-typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int fs; } FjInfo;
+typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; int rt; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int fs; } FjInfo; /* rt: نوع الإرجاع الموحد FJT_NUM/FJT_BOOL */
 
 static int g_fj_depth, g_fj_limit;
 static int g_fj_bailed; /* راية التخفي التعاوني: تُرفع في الكود الأصلي وتُفحص بعد كل استدعاء أصلي */
+static int g_fj_ret_bool; /* علم الرجوع المنطقي: 1 = xmm0 يحمل 1.0/0.0 وRAX القيمة الخام 0/1 */
 #define FJ_STACK_BUDGET (384 * 1024) /* ميزانية كومة C للسلسلة الأصلية — التجاوز ينهار الكومة قبل أن يشعل فحص العمق */
 
 typedef struct { const uint8_t *ip; uint8_t op; int a; int len; int tgt; } FI;
@@ -25,7 +26,7 @@ typedef struct {
   int8_t *depth; uint8_t *ty; uint8_t *fnx; uint8_t *reach; uint8_t *islab;
   int nf; Fun *fns[FJ_MAXDEPS]; int fgi[FJ_MAXDEPS]; Str *fname[FJ_MAXDEPS]; void *fentry[FJ_MAXDEPS];
   XB x; int *lpos; int nlab; struct { int pos, lab; } *fix; int nfix;
-  int maxd; const char *why; FV vs[FJ_MAXD]; int rec;
+  int maxd; const char *why; FV vs[FJ_MAXD]; int rec; int rt; int rtmix; /* rt: نوع الإرجاع من الرجوعات؛ rtmix: رجوعات متضاربة */
 } FC;
 #define TYP(c, i, k) ((c)->ty[(size_t)(i) * FJ_MAXD + (k)])
 #define FNX(c, i, k) ((c)->fnx[(size_t)(i) * FJ_MAXD + (k)])
@@ -110,7 +111,8 @@ static bool fc_step(FC *c, int i, uint8_t *ty, uint8_t *fx, int *dp) {
     case OP_JUMP: case OP_LOOP: break;
     case OP_JIF: case OP_JIT: NEEDN(1); if (ty[d - 1] == FJT_FN) { c->why = "jif"; return false; } break;
     case OP_CHECK: NEEDN(1); if (ty[d - 1] != FJT_NUM || !(in->a & TY_NUM)) { c->why = "check"; return false; } break;
-    case OP_RETURN: NEEDN(1); if (ty[d - 1] != FJT_NUM) { c->why = "return-type"; return false; } break;
+    case OP_RETURN: NEEDN(1); if (ty[d - 1] != FJT_NUM && ty[d - 1] != FJT_BOOL) { c->why = "return-type"; return false; }
+      if (c->rt == FJT_NONE) c->rt = ty[d - 1]; else if (c->rt != (int)ty[d - 1]) c->rtmix = 1; break;
     case OP_GET_GLOBAL: {
       int fi; if (!fc_resolve_global(c, AS_STR(c->f->ch.consts.v[in->a]), &fi)) return false; PUSHT(FJT_FN, (uint8_t)fi); break;
     }
@@ -119,7 +121,7 @@ static bool fc_step(FC *c, int i, uint8_t *ty, uint8_t *fx, int *dp) {
       if (ty[d - 1 - n] != FJT_FN) { c->why = "call-target"; return false; }
       Fun *cf = c->fns[fx[d - 1 - n]]; if (cf->arity != n) { c->why = "arity"; return false; }
       for (int k = 0; k < n; k++) if (ty[d - n + k] != FJT_NUM) { c->why = "call-arg"; return false; }
-      d -= n; ty[d - 1] = FJT_NUM; break;
+      d -= n; ty[d - 1] = cf == c->f ? FJT_NUM : (uint8_t)cf->fj->rt; break; /* نوع النتيجة = إرجاع المستدعى (الذاتي: عدد — المتعاذ المنطقي يُرفض لاحقاً) */
     }
     default: c->why = op_names[in->op]; return false;
   }
@@ -258,14 +260,26 @@ static void fc_emit(FC *c, int frame_size) {
         int n = in->a, base = d - 1 - n; int fi = FNX(c, i, base); Fun *cf = c->fns[fi];
         for (int k = 0; k < n; k++) fc_ld(c, k, base + 1 + k);
         if (cf == c->f) fc_call(c, LB_ENTRY(c)); else { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->fentry[fi]); jx_call_rax(x); }
+        /* النتيجة تُخزَّن قبل فحص التخفي: الرجوع المنطقي يصل خاماً في RAX ويُفسده تحميل عنوان الراية */
+        if (cf != c->f && cf->fj->rt == FJT_BOOL) { jx_mov_mr(x, CELL(base), RAX); c->vs[base].kind = 0; }
+        else fc_store_xmm0(c, base);
         /* انتشار التخفي: إن خفّى المستدعى (عمق/قسمة صفر) فأنزل من هنا أيضاً — لا longjmp */
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
         jx_cmp32_mi(x, RAX, 0, 0); fc_jcc(c, CC_NE, LB_BAIL(c));
-        fc_store_xmm0(c, base); break;
+        break;
       }
       case OP_RETURN: {
-        fc_ld(c, 0, d - 1);
+        /* إنزال العمق أولاً — RAX قد يحمل القيمة المنطقية بعده. العلم يُكتب في كل رجوع:
+           الرجوع العددي يصفّره (استدعاء داخلي منطقي قد سبق في نفس الدعوة) والمنطقي يرفعه */
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth); jx_rm(x, 0, 0, 0x83, 5, RAX, -1, 0, 0); xb_b(x, 1);
+        if (TYP(c, i, d - 1) == FJT_BOOL) {
+          jx_mov_rm(x, RAX, CELL(d - 1)); jx_movzx8_rr(x, RAX, RAX); /* RAX = 0/1 الخام لمستدعي الجيت */
+          jx_cvtsi2sd32(x, 0, RAX); /* xmm0 = 1.0/0.0 لحدّ المفسّر */
+          jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x01); xb_u32(x, 1); /* mov dword [rcx], 1 */
+        } else {
+          fc_ld(c, 0, d - 1);
+          jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 0); /* mov dword [rax], 0 */
+        }
         xb_b(x, 0xC9); jx_ret(x); break;
       }
       default: c->why = "emit"; return;
@@ -298,6 +312,10 @@ static bool fj_compile(Closure *clo) {
   c->reach = calloc(FJ_MAXI, 1); c->islab = calloc(FJ_MAXI, 1);
   c->nf = 0;
   if (!fc_analyze(c)) { if (g_jit_trace) fprintf(stderr, "[fnjit] رُفضت '%s': %s\n", f->name ? f->name->chars : "?", c->why ? c->why : "?"); goto out; }
+  if (c->rtmix || (c->rec && c->rt == FJT_BOOL)) { /* رجوعات متضاربة، أو تعاذٍ منطقي (نتيجته تُخزَّن عددية في الاستدعاء الذاتي) */
+    c->why = c->rtmix ? "return-mixed" : "rec-bool";
+    if (g_jit_trace) fprintf(stderr, "[fnjit] رُفضت '%s': %s\n", f->name ? f->name->chars : "?", c->why); goto out;
+  }
   c->x.cap = 1 << 17; c->x.p = malloc((size_t)c->x.cap); c->x.n = 0;
   c->lpos = malloc(sizeof(int) * (size_t)(c->n + 4)); for (int i = 0; i < c->n + 4; i++) c->lpos[i] = -1;
   c->fix = malloc(sizeof(c->fix[0]) * FJ_MAXFIX);
@@ -317,7 +335,7 @@ static bool fj_compile(Closure *clo) {
   void *mem = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); if (mem == MAP_FAILED) goto out;
   memcpy(mem, c->x.p, (size_t)c->x.n);
   if (mprotect(mem, sz, PROT_READ | PROT_EXEC) != 0) { munmap(mem, sz); goto out; }
-  fj = calloc(1, sizeof(FjInfo)); fj->mem = mem; fj->msz = sz; fj->entry = mem; fj->fs = fs; g_jit_bytes += sz;
+  fj = calloc(1, sizeof(FjInfo)); fj->mem = mem; fj->msz = sz; fj->entry = mem; fj->fs = fs; fj->rt = c->rt; g_jit_bytes += sz;
   for (int i = 0; i < c->nf; i++) {
     fj->deps[fj->nd++] = c->fns[i];
     fj->g[fj->ng].d = &clo->globals->d; fj->g[fj->ng].gi = c->fgi[i]; fj->g[fj->ng].name = c->fname[i]; fj->g[fj->ng].fun = c->fns[i]; fj->ng++;
@@ -330,7 +348,7 @@ out:
   f->fjst = ok ? 1 : 2; return ok;
 }
 
-static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
+static bool fj_run(Closure *clo, Value *args, int argc, Value *out) {
   FjInfo *fj = clo->f->fj;
   for (int i = 0; i < fj->ng; i++) {
     FjGuard *g = &fj->g[i]; Dict *d = g->d;
@@ -338,7 +356,7 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
   }
   double a[FJ_MAXARGS];
   for (int i = 0; i < argc; i++) { if (!IS_NUM(args[i])) return false; a[i] = args[i].as.n; }
-  g_fj_depth = 0; g_fj_bailed = 0; g_fj_limit = vm.frames_max - vm.fcount - 4;
+  g_fj_depth = 0; g_fj_bailed = 0; g_fj_ret_bool = 0; g_fj_limit = vm.frames_max - vm.fcount - 4;
   { /* سقف كومة C: كل مستوى أصلي يستهلك fs+16 بايت — حد أكبر من الكومة ينهارها قبل أن يشعل فحص العمق */
     int lim = (int)(FJ_STACK_BUDGET / (fj->fs + 64));
     if (g_fj_limit > lim) g_fj_limit = lim;
@@ -355,7 +373,7 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
     default: r = ((double (*)(double, double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4], a[5]); break;
   }
   if (g_fj_bailed) { fj->bails++; return false; } /* خفّى الكود الأصلي (عمق/قسمة صفر): أعدها للمفسّر */
-  *out = r; return true;
+  *out = g_fj_ret_bool ? BOOLV(r != 0) : NUMV(r); return true;
 }
 #else
 static void fj_free(Fun *f) { (void)f; }
