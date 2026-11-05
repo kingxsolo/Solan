@@ -12,11 +12,11 @@
 enum { FJT_NONE = 0, FJT_NUM = 1, FJT_BOOL = 2, FJT_FN = 3 };
 
 typedef struct FjGuard { Dict *d; int gi; Str *name; Fun *fun; } FjGuard;
-typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int rec; int maxd; } FjInfo;
+typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int fs; } FjInfo;
 
-static jmp_buf g_fj_jb;
 static int g_fj_depth, g_fj_limit;
-static void fj_bail(void) { longjmp(g_fj_jb, 1); }
+static int g_fj_bailed; /* راية التخفي التعاوني: تُرفع في الكود الأصلي وتُفحص بعد كل استدعاء أصلي */
+#define FJ_STACK_BUDGET (384 * 1024) /* ميزانية كومة C للسلسلة الأصلية — التجاوز ينهار الكومة قبل أن يشعل فحص العمق */
 
 typedef struct { const uint8_t *ip; uint8_t op; int a; int len; int tgt; } FI;
 typedef struct { uint8_t kind; double imm; int ref; } FV;
@@ -258,6 +258,9 @@ static void fc_emit(FC *c, int frame_size) {
         int n = in->a, base = d - 1 - n; int fi = FNX(c, i, base); Fun *cf = c->fns[fi];
         for (int k = 0; k < n; k++) fc_ld(c, k, base + 1 + k);
         if (cf == c->f) fc_call(c, LB_ENTRY(c)); else { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->fentry[fi]); jx_call_rax(x); }
+        /* انتشار التخفي: إن خفّى المستدعى (عمق/قسمة صفر) فأنزل من هنا أيضاً — لا longjmp */
+        jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
+        jx_cmp32_mi(x, RAX, 0, 0); fc_jcc(c, CC_NE, LB_BAIL(c));
         fc_store_xmm0(c, base); break;
       }
       case OP_RETURN: {
@@ -268,8 +271,14 @@ static void fc_emit(FC *c, int frame_size) {
       default: c->why = "emit"; return;
     }
   }
+  /* نقطة التخفي التعاوني: ارفع الراية وأنزل إطاراً واحداً. لا longjmp هنا:
+     longjmp على Win64 يمشي الإطارات عبر RtlUnwind وينهار على كود مولّد بلا معلومات فك */
   fc_bind(c, LB_BAIL(c));
-  fc_call_helper(c, (void *)fj_bail);
+  jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
+  xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 1); /* mov dword [rax], 1 */
+  jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth);
+  jx_rm(x, 0, 0, 0x83, 5, RAX, -1, 0, 0); xb_b(x, 1); /* sub dword [rax], 1 */
+  xb_b(x, 0xC9); jx_ret(x);
 }
 
 static void fj_free(Fun *f) {
@@ -308,22 +317,10 @@ static bool fj_compile(Closure *clo) {
   void *mem = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); if (mem == MAP_FAILED) goto out;
   memcpy(mem, c->x.p, (size_t)c->x.n);
   if (mprotect(mem, sz, PROT_READ | PROT_EXEC) != 0) { munmap(mem, sz); goto out; }
-  fj = calloc(1, sizeof(FjInfo)); fj->mem = mem; fj->msz = sz; fj->entry = mem; g_jit_bytes += sz;
+  fj = calloc(1, sizeof(FjInfo)); fj->mem = mem; fj->msz = sz; fj->entry = mem; fj->fs = fs; g_jit_bytes += sz;
   for (int i = 0; i < c->nf; i++) {
     fj->deps[fj->nd++] = c->fns[i];
     fj->g[fj->ng].d = &clo->globals->d; fj->g[fj->ng].gi = c->fgi[i]; fj->g[fj->ng].name = c->fname[i]; fj->g[fj->ng].fun = c->fns[i]; fj->ng++;
-  }
-  /* أقصى عمق تعاود قابل للوصول: يحدد هل نحتاج setjmp في كل استدعاء */
-  {
-    int md = 1;
-    for (int i = 0; i < c->nf; i++) {
-      if (c->fns[i] == f) { md = 1 << 29; break; }
-      FjInfo *dfj = c->fns[i]->fj;
-      int dm = (dfj && dfj->rec) ? (1 << 29) : (dfj ? dfj->maxd : 1);
-      if (1 + dm > md) md = 1 + dm;
-    }
-    if (c->rec) md = 1 << 29;
-    fj->rec = (md >= (1 << 29)); fj->maxd = md;
   }
   f->fj = fj; ok = true;
   if (g_jit_trace) fprintf(stderr, "[fnjit] جُمّعت الدالة '%s': %d تعليمة، %d بايت\n", f->name ? f->name->chars : "?", c->n, c->x.n);
@@ -341,10 +338,12 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
   }
   double a[FJ_MAXARGS];
   for (int i = 0; i < argc; i++) { if (!IS_NUM(args[i])) return false; a[i] = args[i].as.n; }
-  g_fj_depth = 0; g_fj_limit = vm.frames_max - vm.fcount - 4; if (g_fj_limit < 16) return false;
-  /* setjmp مكلف (~40ns): نكتفي به فقط للدوال التي قد تتجاوز حد العمق فعلاً
-     (التعاودية أو سلسلة تبعيات أعمق من الحد). غير ذلك الاستدعاء المباشر آمن. */
-  if (fj->rec || fj->maxd > g_fj_limit) { if (setjmp(g_fj_jb)) { fj->bails++; return false; } }
+  g_fj_depth = 0; g_fj_bailed = 0; g_fj_limit = vm.frames_max - vm.fcount - 4;
+  { /* سقف كومة C: كل مستوى أصلي يستهلك fs+16 بايت — حد أكبر من الكومة ينهارها قبل أن يشعل فحص العمق */
+    int lim = (int)(FJ_STACK_BUDGET / (fj->fs + 64));
+    if (g_fj_limit > lim) g_fj_limit = lim;
+  }
+  if (g_fj_limit < 16) return false;
   double r;
   switch (argc) {
     case 0: r = ((double (*)(void))fj->entry)(); break;
@@ -355,6 +354,7 @@ static bool fj_run(Closure *clo, Value *args, int argc, double *out) {
     case 5: r = ((double (*)(double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4]); break;
     default: r = ((double (*)(double, double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4], a[5]); break;
   }
+  if (g_fj_bailed) { fj->bails++; return false; } /* خفّى الكود الأصلي (عمق/قسمة صفر): أعدها للمفسّر */
   *out = r; return true;
 }
 #else

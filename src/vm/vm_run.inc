@@ -249,8 +249,9 @@ static int run(int base) {
         if (jr) {
           JitCtx cx; cx.slots = frame->slots; cx.sp = sp; cx.clo = frame->clo; cx.ip = ip - off; cx.code = 0;
           jr->fn(&cx);
-          sp = cx.sp; ip = (uint8_t *)cx.ip;
           if (cx.code != 0 && ++jr->deopts > JIT_MAX_DEOPT) *cnt = JIT_OFF;
+          if (cx.code == 2) goto throw_exc; /* استثناء من call-out: vm.exc مضبوط والآلة تحت sp — لا استخدام لـ sp/ip */
+          sp = cx.sp; ip = (uint8_t *)cx.ip;
           NEXT();
         }
       }

@@ -68,6 +68,17 @@ static double jit_h_mod(double a, double b) {
 }
 static double jit_h_pow(double a, double b) { return sol_pow(a, b); }
 
+/* مساعد call-out لـ OP_CALL: ينفّذ الاستدعاءَ غير القابل للإدراج عبر آلية المفسّر كاملةً
+   ثم تعود المنطقة للعمل. vm.sp = قمة المكدس عند الاستدعاء (تحت المنطقة كلها مُفرَّغة مسبقاً).
+   عند الفشل يضبط code=2 (استثناء: vm.exc مضبوط والآلة متسقة تحت sp) بلا تفريغ سجلات. */
+static Value *jit_h_call(JitCtx *cx, Value *sp, int argc, const uint8_t *call_ip) {
+  vm.sp = sp;
+  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)call_ip; /* أسطر الأخطاء داخل call_value تشير لموقع الاستدعاء */
+  if (vm.gc_pending) collect();
+  if (!call_sync(argc)) cx->code = 2;
+  return vm.sp;
+}
+
 static int jc_new_label(JC *c) { if (c->nlab >= JMAXLAB) { c->failed = 1; c->why = "labels"; return 0; } c->lpos[c->nlab] = -1; return c->nlab++; }
 static void jc_bind(JC *c, int l) { c->lpos[l] = c->x.n; }
 static void jc_fixup(JC *c, int l) {
@@ -224,6 +235,7 @@ typedef struct { int ic, d0, argc, blen, b; Fun *pf; BOP *bp; } ISITE;
 static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *blenout, int *bout) {
   const uint8_t *ip = pf->ch.code, *end = pf->ch.code + pf->ch.n;
   int bd = 0, bmax = 0, cnt = 0, b = -1;
+  const char *rej = NULL;
   while (ip < end) {
     uint8_t op = op_norm(*ip);
     int len = 1 + op_operand_len(pf, ip);
@@ -235,37 +247,43 @@ static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *bl
       default: break;
     }
     if (op == OP_RETURN) {
-      if (bd < 1) return 0; /* بلا قيمة */
+      if (bd < 1) { rej = "رجع بلا قيمة"; goto fail; }
       b = bd; break; /* ما بعد أول رجع غير قابل للوصول (لا قفزات في الجسم) — كالنمط الضمني NIL/RETURN */
     }
     switch (op) {
       case OP_CONST: {
-        if (a >= pf->ch.consts.n) return 0;
+        if (a >= pf->ch.consts.n) { rej = "ثابت خارج النطاق"; goto fail; }
         Value v = pf->ch.consts.v[a];
-        if (!IS_NUM(v) && !IS_T(v, O_STR)) return 0;
+        if (!IS_NUM(v) && !IS_T(v, O_STR)) { rej = "ثابت ليس رقماً/نصاً"; goto fail; }
         bd++; break;
       }
-      case OP_GET_LOCAL: if (a < 1 || a > argc) return 0; bd++; break; /* الوسائط فقط: 0 = المستدعى نفسه مرفوض */
+      case OP_GET_LOCAL: if (a < 1 || a > argc) { rej = "محلي خارج الوسائط"; goto fail; } bd++; break; /* الوسائط فقط: 0 = المستدعى نفسه مرفوض */
+      case OP_TRUE: case OP_FALSE: case OP_NIL: case OP_DUP: bd++; break;
       case OP_GET_GLOBAL: {
-        if (a >= pf->ch.consts.n || !IS_T(pf->ch.consts.v[a], O_STR)) return 0;
+        if (a >= pf->ch.consts.n || !IS_T(pf->ch.consts.v[a], O_STR)) { rej = "اسم عام غير نصي"; goto fail; }
         Str *nm = AS_STR(pf->ch.consts.v[a]);
-        if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0) return 0; /* عام غير معرَّف بعد */
+        if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0) { rej = "عام غير معرف بعد"; goto fail; }
         bd++; break;
       }
-      case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV: bd--; break;
-      case OP_NEG: break;
-      default: return 0;
+      case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV:
+      case OP_EQ: case OP_LT: case OP_LE: case OP_GT: case OP_GE:
+      case OP_BAND: case OP_BOR: case OP_BXOR: case OP_SHL: case OP_SHR: bd--; break;
+      case OP_NEG: case OP_NOT: break;
+      default: rej = op_names[op]; goto fail;
     }
-    if (bd < 0) return 0;
+    if (bd < 0) { rej = "مكدس سالب"; goto fail; }
     if (bd > bmax) bmax = bd;
-    if (cnt >= JMAXBODY) return 0;
+    if (cnt >= JMAXBODY) { rej = "جسم طويل"; goto fail; }
     bp[cnt].ip = ip; bp[cnt].op = op; bp[cnt].a = a; bp[cnt].len = (uint8_t)len; cnt++;
     ip += len;
   }
-  if (b < 0) return 0; /* بلا رجع */
-  if (D_call + bmax > JMAXD - 5) return 0;
+  if (b < 0) { rej = "بلا رجع"; goto fail; }
+  if (D_call + bmax > JMAXD - 5) { rej = "عمق زائد"; goto fail; }
   *blenout = cnt; *bout = b;
   return 1;
+  fail:
+  if (g_jit_trace) fprintf(stderr, "[inline] جسم %s رُفض عند %s (bd=%d)\n", pf->name ? pf->name->chars : "?", rej ? rej : "?", bd);
+  return 0;
 }
 
 static void jc_inline(JC *c) {
@@ -345,7 +363,10 @@ static void jc_inline(JC *c) {
       BOP *bo = &st[s].bp[k];
       JI *ni = &c->ins[ic + k];
       ni->ip = k == 0 ? call_ip : bo->ip; /* الأولى تحمل ip الاستدعاء: تخفيها الذاتي يصيب الموضع الصحيح */
-      ni->op = bo->op; ni->a = bo->a; ni->b = 0; ni->c = 0; ni->len = bo->len;
+      ni->op = bo->op;
+      /* ترجمة الوسيط: محلي الجسم a (1..argc) هو الوسيط a في عمق المتصل d0+a → سلوت مطلق spoff+d0+a */
+      ni->a = bo->op == OP_GET_LOCAL ? bo->a + c->spoff + st[s].d0 : bo->a;
+      ni->b = 0; ni->c = 0; ni->len = bo->len;
       ni->tgt = -1; ni->tip = NULL;
       ni->pf = (bo->op == OP_CONST || bo->op == OP_GET_GLOBAL) ? pf : NULL;
       ni->rd = k == 0 ? -1 : ic;
@@ -818,6 +839,15 @@ static void jc_gen_body(JC *c) {
         } else {
           Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = jc_global_index(c, nm);
           b = R13; dd = gi * (int)sizeof(Ent) + (int)offsetof(Ent, v);
+          /* فحص هوية لكل موقع إدراج: المستدعى المُدرج يجب أن يظل هو نفسه عند كل تنفيذ —
+             تغيّر العام ⇒ تخفي إلى ip التعليمة نفسها فيعيد المفسّر قراءته بالقيمة الجديدة */
+          for (int z = 0; z < c->ng; z++) if (c->gnames[z] == nm && c->gexp[z]) {
+            int dl = jc_deopt(c, i, d);
+            jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_OBJ); jc_jcc(c, CC_NE, dl);
+            jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[z]);
+            jx_cmp_rm(x, RAX, b, dd + 8); jc_jcc(c, CC_NE, dl);
+            break;
+          }
         }
         c->sd[d] = sd_mk(SK_HOME); c->sd[d].hb = (int8_t)b; c->sd[d].hd = dd;
         if (in->op == OP_GET_LOCAL && in->a >= c->spoff) c->sd[d].n = c->sd[in->a - c->spoff].n;
@@ -1049,6 +1079,36 @@ static void jc_gen_body(JC *c) {
         }
         break;
       }
+      case OP_CALL: {
+        /* call-out: استدعاء غير قابل للإدراج يُنفَّذ عبر مساعد C ثم تكمل المنطقة.
+           المستدعى عند d-1-argc والوسائط حتى d-1؛ النتيجة تعود حتمياً في ذاكرة d-1-argc. */
+        int argc = in->a;
+        if (d - 1 - argc < 0) { c->failed = 1; c->why = "call"; break; }
+        jc_canon(c, 0, d); /* كل ما تحت القمة إلى الذاكرة: المستدعى والوسائط يُقرأون من المكدس الحقيقي */
+        jc_flush_vars(c);  /* قيم السجلات إلى بيوتها قبل الـ GC والاستدعاء */
+        int ex2 = jc_exit_label2(c, in->ip, d - argc, 2);           /* استثناء: بلا تفريغ */
+        int ex3 = jc_exit_label2(c, in->ip + in->len, d - argc, 3); /* تخفي بعد الاستدعاء: المكدس صحيح أصلاً */
+        jx_mov_rr(x, RCX, R15);
+        jx_lea(x, RDX, R12, -1, 0, d * 16);
+        jx_mov_ri(x, R8, (uint64_t)argc);
+        jx_mov_ri(x, R9, (uint64_t)(uintptr_t)in->ip);
+        jc_call_helper(c, (void *)jit_h_call);
+        jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
+        if (c->ng > 0) { /* إعادة اشتقاق R13: قد يكون قاموس العوالم نما أو نُظم */
+          jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
+          jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
+          jx_mov_rm(x, R13, RSI, (int)offsetof(Dict, e));
+        }
+        for (int k = 0; k < c->npv; k++) { /* إعادة تحميل pv مع فحص الوسم: العوالم تتغير والمحليات عبر upvalues */
+          PV *p = &c->pv[k];
+          if (p->noc && !p->g) continue; /* سلوت حلقة داخلية: لا مستدعى يصل إليه */
+          int b, dd; jc_pv_home(p, &b, &dd);
+          jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_NUM); jc_jcc(c, CC_NE, ex3);
+          jx_movsd_rm(x, p->reg, b, dd + 8);
+        }
+        c->sd[d - 1 - argc] = sd_mk(SK_MEM); /* النتيجة في الذاكرة حتمياً */
+        break;
+      }
       default: c->failed = 1; c->why = "op"; break;
     }
   }
@@ -1092,7 +1152,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   if (c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] توليد فشل: %s\n", c->why ? c->why : "?"); goto out; }
   jc_bind(c, lguards);
   {
-    int fail = jc_exit_label2(c, head, 0, 2);
+    int fail = jc_exit_label2(c, head, 0, 3); /* تخفي بلا تفريغ: سجلات pv غير محملة بعد والاستئناف من رأس المنطقة */
     if (c->ng > 0) {
       jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
       jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
@@ -1130,7 +1190,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   }
   for (int k = 0; k < c->nex; k++) {
     JX *e = &c->ex[k]; jc_bind(c, e->lab);
-    if (e->code != 2) jc_flush_vars(c);
+    if (e->code == 0 || e->code == 1) jc_flush_vars(c); /* code=3: السجلات بائتة جزئياً — التفريغ يفسد البيوت */
     jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)e->ip); jx_mov_mr(x, R15, (int)offsetof(JitCtx, ip), RAX);
     jx_lea(x, RAX, R12, -1, 0, e->depth * 16); jx_mov_mr(x, R15, (int)offsetof(JitCtx, sp), RAX);
     jx_mov32_mi(x, R15, (int)offsetof(JitCtx, code), (uint32_t)e->code);
