@@ -102,6 +102,35 @@ static void fmt_num_raw(double n, Buf *b) {
   if (isinf(n)) { buf_add(b, n < 0 ? "-inf" : "inf", 4); return; }
   if (n == 0) { buf_addc(b, '0'); return; }
   if (n == floor(n) && fabs(n) < 1e15) { char t[24]; buf_add(b, t, fnr_itoa(n, t)); return; } /* الأعداد الصحيحة: بلا vsnprintf */
+  /* مسار سريع: كسور ثنائية m/2^j (شائعة في الحساب: x*1.5، x/4...) — صيغة عشرية مباشرة بلا snprintf/strtod */
+  {
+    double m = n; int j = 0;
+    while (j < 22 && m != floor(m)) { m *= 2; j++; } /* يتوقف عند أول m صحيح — إن لم يصله خلال 22 فليست كسراً قصيراً */
+    if (j > 0 && m == floor(m) && fabs(m) < 9.0e15) {
+      static const long long p5[23] = { 1, 5, 25, 125, 625, 3125, 15625, 78125, 390625, 1953125, 9765625,
+        48828125, 244140625, 1220703125, 6103515625LL, 30517578125LL, 152587890625LL, 762939453125LL,
+        3814697265625LL, 19073486328125LL, 95367431640625LL, 476837158203125LL, 2384185791015625LL };
+      long long mm = (long long)m;
+      if (fabs(m) < 9.2e18 / (double)p5[j]) { /* m×5^j يجب أن يتسع في 64 بت */
+        long long d = mm * p5[j]; /* القيمة ×10^j بالضبط — m فردي فلا أصفار زائدة */
+        unsigned long long u = (unsigned long long)(d < 0 ? -d : d);
+        char t[24], out[40]; int n2 = 0, k = 0, on = 0;
+        do { t[n2++] = (char)('0' + u % 10); u /= 10; } while (u);
+        if (d < 0) out[on++] = '-';
+        int digits = n2;
+        if (digits > j) { /* جزء صحيح ثم فاصلة ثم الكسر */
+          while (n2 > j) out[on++] = t[--n2];
+          out[on++] = '.';
+          while (n2) out[on++] = t[--n2];
+        } else { /* 0.00xxx */
+          out[on++] = '0'; out[on++] = '.';
+          for (int z = 0; z < j - digits; z++) out[on++] = '0';
+          while (n2) out[on++] = t[--n2];
+        }
+        buf_add(b, out, on); return;
+      }
+    }
+  }
   char t[48]; int p;
   for (p = 15; p <= 17; p++) { snprintf(t, sizeof t, "%.*e", p - 1, n); if (strtod(t, NULL) == n) break; }
   char dg[24]; int k = 0; const char *q = t; bool neg = false;

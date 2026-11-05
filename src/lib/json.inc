@@ -103,7 +103,28 @@ static Value jval(JP *j, int depth) {
   if (j->end - j->p >= 4 && !strncmp(j->p, "true", 4)) { j->p += 4; return BOOLV(true); }
   if (j->end - j->p >= 5 && !strncmp(j->p, "false", 5)) { j->p += 5; return BOOLV(false); }
   if (j->end - j->p >= 4 && !strncmp(j->p, "null", 4)) { j->p += 4; return NIL; }
-  if (c == '-' || (c >= '0' && c <= '9')) { char *e; double d = strtod(j->p, &e); if (e == j->p) { j->err = true; return NIL; } j->p = e; return NUMV(d); }
+  if (c == '-' || (c >= '0' && c <= '9')) {
+    /* مسار سريع: أعداد بلا أس ≤15 خانة — صحيح مضاعف الدقة + قسمة واحدة، بلا strtod */
+    const char *q = j->p; bool neg = (*q == '-'); if (neg) q++;
+    if (q < j->end && *q >= '0' && *q <= '9') {
+      unsigned long long m = 0; const char *d0 = q; int frac = 0; bool dot = false, ok = true;
+      while (q < j->end) {
+        char ch = *q;
+        if (ch >= '0' && ch <= '9') { m = m * 10 + (unsigned long long)(ch - '0'); if (dot) frac++; q++; }
+        else if (ch == '.' && !dot) { dot = true; q++; }
+        else break;
+      }
+      if (q - d0 > 15) ok = false; /* أكثر من 15 خانة قد يفقد دقة المضاعف */
+      if (ok && q < j->end && (*q == 'e' || *q == 'E')) ok = false;
+      if (ok) {
+        static const double p10[16] = { 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000,
+          1000000000, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15 };
+        double v = frac ? (double)m / p10[frac] : (double)m; /* قسمة صحيحة التدوير = أقرب مضاعف للقيمة العشرية */
+        j->p = q; return NUMV(neg ? -v : v);
+      }
+    }
+    char *e; double d = strtod(j->p, &e); if (e == j->p) { j->err = true; return NIL; } j->p = e; return NUMV(d);
+  }
   j->err = true; return NIL;
 }
 NAT(j_dec) {

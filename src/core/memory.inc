@@ -30,6 +30,9 @@ static void pool_free(void *p, size_t n) {
   if (n > POOL_MAX) { free(p); return; }
   size_t c = (n + 15) >> 4; *(void **)p = g_pool_fl[c]; g_pool_fl[c] = p;
 }
+/* مصفوفات القواميس: الصغيرة عبر المجمّع (فك/ترميز يولّدان آلاف القواميس القصيرة) — إقران الحجم بين التخصيص والتحرير */
+static void *dalloc(size_t n) { return n <= POOL_MAX ? pool_alloc(n) : xalloc(n); }
+static void dfree_sz(void *p, size_t n) { if (!p) return; if (n <= POOL_MAX) { pool_free(p, n); return; } free(p); }
 static Obj *newobj(size_t sz, OT t) {
   Obj *o = (Obj *)pool_alloc(sz);
   o->t = t; o->mark = false; o->next = vm.objs; vm.objs = o;
@@ -249,10 +252,10 @@ static int dfind(Dict *d, Value k, uint32_t h) {
 }
 static void drebuild(Dict *d, int ncap) {
   if (g_mfn_memo.d == d) g_mfn_memo.d = NULL;
-  Ent *ne = xalloc(sizeof(Ent) * ncap); int n = 0;
+  Ent *ne = (Ent *)dalloc(sizeof(Ent) * ncap); int n = 0;
   for (int i = 0; i < d->n; i++) if (d->e[i].k.t != V_EMPTY) ne[n++] = d->e[i];
-  free(d->e); d->e = ne; d->n = n; d->cap = ncap; d->live = n;
-  free(d->idx); d->icap = ncap * 2; d->idx = xalloc(sizeof(int) * d->icap);
+  dfree_sz(d->e, sizeof(Ent) * (size_t)d->cap); d->e = ne; d->n = n; d->cap = ncap; d->live = n;
+  dfree_sz(d->idx, sizeof(int) * (size_t)d->icap); d->icap = ncap * 2; d->idx = (int *)dalloc(sizeof(int) * d->icap);
   for (int i = 0; i < d->icap; i++) d->idx[i] = -1;
   for (int i = 0; i < n; i++) {
     uint32_t m = d->icap - 1, j = vhash(ne[i].k) & m;
@@ -281,7 +284,7 @@ static bool ddel(Dict *d, Value k, Value *old) {
   if (g_mfn_memo.d == d) g_mfn_memo.d = NULL;
   d->e[x].k = EMPTYV; d->e[x].v = NIL; d->live--; return true;
 }
-static void dfree(Dict *d) { if (g_mfn_memo.d == d) g_mfn_memo.d = NULL; free(d->e); free(d->idx); d->e = NULL; d->idx = NULL; d->n = d->cap = d->live = d->icap = 0; }
+static void dfree(Dict *d) { if (g_mfn_memo.d == d) g_mfn_memo.d = NULL; dfree_sz(d->e, sizeof(Ent) * (size_t)d->cap); dfree_sz(d->idx, sizeof(int) * (size_t)d->icap); d->e = NULL; d->idx = NULL; d->n = d->cap = d->live = d->icap = 0; }
 
 static bool mget(Dict *d, Value k, Value *out) {
   if (dget(d, k, out)) return true;
