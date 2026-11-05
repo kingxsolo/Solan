@@ -30,7 +30,7 @@ typedef struct SBuf { int refs; int cap; int used; char data[]; } SBuf;
 typedef struct Str { Obj o; int len; uint32_t hash; struct Str *hnext; char *chars; SBuf *sb; } Str;
 
 typedef struct { Value k, v; } Ent;
-typedef struct { Ent *e; int n, cap, live; int *idx; int icap; } Dict;
+typedef struct { Ent *e; int n, cap, live; int *idx; int icap; int gen; } Dict;
 typedef struct { Value *v; int n, cap; } VArr;
 
 typedef struct { uint8_t *code; int *lines; int n, cap; VArr consts; } Chunk;

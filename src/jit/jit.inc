@@ -51,6 +51,7 @@ typedef struct {
   JX ex[JMAXI * 2]; int nex;
   int dl[JMAXI];
   Str *gnames[JMAXV]; int ggi[JMAXV]; Closure *gexp[JMAXV]; int ng; /* gexp: قيمة عام متوقعة لمستدعٍ مُدرج (NULL = بلا حراسة قيمة) */
+  int nbi; int ggen; /* nbi: مواقع قراءة عام مدمج (تحتاج R13)؛ ggen: جيل قاموس العوالم عند الترجمة */
   JS *sx; int nsx, csx;
   PV pv[64]; int npv; int usepromo; int spoff;
   SD sd[JMAXD + 8];
@@ -158,7 +159,7 @@ static int jc_analyze(JC *c) {
   c->n = 0;
   while (ip < c->tail) {
     if (c->n >= JMAXI) return 0;
-    JI *in = &c->ins[c->n]; in->ip = ip; in->op = op_norm(*ip); in->len = 1 + op_operand_len(c->fn, ip); in->tgt = -1; in->tip = NULL;
+    JI *in = &c->ins[c->n]; in->ip = ip; in->op = op_norm(*ip); in->len = 1 + op_operand_len(c->fn, ip); in->tgt = -1; in->tip = NULL; in->rd = -1; /* calloc يتركه 0 — بلا هذا يُعاد كل تخفي إلى ins[0] */
     const uint8_t *ar = ip + 1;
     in->a = in->b = in->c = 0;
     switch ((Op)in->op) {
@@ -830,22 +831,46 @@ static void jc_gen_body(JC *c) {
       case OP_GET_LOCAL: case OP_GET_GLOBAL: {
         int k = -1;
         if (in->op == OP_GET_LOCAL) k = jc_find_pv(c, 0, in->a);
-        else { Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
+        else { /* الترقية لأعالم العوالم فقط — المدمجة لا تُرقّى (ليست أعداداً) */
+          Str *nm = AS_STR(jc_kc(c, in)[in->a]);
+          if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) >= 0) { int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
+        }
         if (k >= 0) { c->sd[d] = sd_mk(SK_VAR); c->sd[d].r = (uint8_t)c->pv[k].reg; c->sd[d].var = k; break; }
         int b, dd;
         if (in->op == OP_GET_LOCAL) {
           if (in->a >= c->spoff) { int p = in->a - c->spoff; if (p >= d) { c->failed = 1; c->why = "slot"; break; } jc_mat(c, p); }
           jc_local_home(c, in->a, &b, &dd);
         } else {
-          Str *nm = AS_STR(jc_kc(c, in)[in->a]); int gi = jc_global_index(c, nm);
-          b = R13; dd = gi * (int)sizeof(Ent) + (int)offsetof(Ent, v);
-          /* فحص هوية لكل موقع إدراج: المستدعى المُدرج يجب أن يظل هو نفسه عند كل تنفيذ —
-             تغيّر العام ⇒ تخفي إلى ip التعليمة نفسها فيعيد المفسّر قراءته بالقيمة الجديدة */
-          for (int z = 0; z < c->ng; z++) if (c->gnames[z] == nm && c->gexp[z]) {
+          Str *nm = AS_STR(jc_kc(c, in)[in->a]);
+          int gi = dfind(&c->clo->globals->d, OBJV(nm), nm->hash);
+          if (gi >= 0) {
+            gi = jc_global_index(c, nm);
+            b = R13; dd = gi * (int)sizeof(Ent) + (int)offsetof(Ent, v);
+            /* فحص هوية لكل موقع إدراج: المستدعى المُدرج يجب أن يظل هو نفسه عند كل تنفيذ —
+               تغيّر العام ⇒ تخفي إلى ip التعليمة نفسها فيعيد المفسّر قراءته بالقيمة الجديدة */
+            for (int z = 0; z < c->ng; z++) if (c->gnames[z] == nm && c->gexp[z]) {
+              int dl = jc_deopt(c, i, d);
+              jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_OBJ); jc_jcc(c, CC_NE, dl);
+              jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[z]);
+              jx_cmp_rm(x, RAX, b, dd + 8); jc_jcc(c, CC_NE, dl);
+              break;
+            }
+          } else {
+            /* عام مدمج (طول، اطبع...): يُقرأ حديثاً من vm.builtins في كل تنفيذ فلا حارس قيمة.
+               حارس الظل: جيل قاموس العوالم لم يتغير منذ الترجمة ⇒ لم يُلحَق أي عام جديد
+               ⇒ الاسم غير مظلَّل؛ أي إلحاق (حتى من استدعاء وسط التنفيذ) يزيد الجيل ⇒
+               تخفي إلى ip التعليمة فيقرأه المفسّر بالمسار الطبيعي (ظلّ أو مدمج). */
+            int bi = dfind(&vm.builtins, OBJV(nm), nm->hash);
+            if (bi < 0) { c->failed = 1; c->why = "global"; break; }
+            c->nbi++;
             int dl = jc_deopt(c, i, d);
-            jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_OBJ); jc_jcc(c, CC_NE, dl);
-            jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[z]);
-            jx_cmp_rm(x, RAX, b, dd + 8); jc_jcc(c, CC_NE, dl);
+            jx_cmp32_mi(x, R13, (int)offsetof(Dict, gen) - (int)offsetof(Dict, e), c->ggen); jc_jcc(c, CC_NE, dl);
+            jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&vm.builtins.e);
+            jx_mov_rm(x, RSI, RAX, 0);
+            jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)nm);
+            jx_cmp_rm(x, RAX, RSI, bi * (int)sizeof(Ent) + (int)offsetof(Ent, k) + 8); jc_jcc(c, CC_NE, dl);
+            jc_copy16(c, R12, d * 16, RSI, bi * (int)sizeof(Ent) + (int)offsetof(Ent, v));
+            c->sd[d] = sd_mk(SK_MEM);
             break;
           }
         }
@@ -1094,7 +1119,7 @@ static void jc_gen_body(JC *c) {
         jx_mov_ri(x, R9, (uint64_t)(uintptr_t)in->ip);
         jc_call_helper(c, (void *)jit_h_call);
         jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
-        if (c->ng > 0) { /* إعادة اشتقاق R13: قد يكون قاموس العوالم نما أو نُظم */
+        if (c->ng > 0 || c->nbi > 0) { /* إعادة اشتقاق R13: القاموس قد نما (فحص الجيل يقرأ من R13) */
           jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
           jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
           jx_mov_rm(x, R13, RSI, (int)offsetof(Dict, e));
@@ -1119,6 +1144,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   JitRegion *res = NULL;
   c->fn = fn; c->clo = clo; c->slots = slots; c->head = head; c->tail = tail;
   c->spoff = (int)(sp - slots); c->usepromo = 1;
+  c->ggen = (&c->clo->globals->d)->gen; /* جيل العوالم عند الترجمة: أساس حارس ظلّ المدمج */
   c->x.cap = 1 << 20; c->x.p = malloc(c->x.cap);
   if (!jc_analyze(c)) { if (g_jit_trace) fprintf(stderr, "[jit] تحليل فشل: %s\n", c->why ? c->why : "?"); goto out; }
   jc_inline(c); /* إدراج أجسام الدوال قبل الترقية والتوليد */
@@ -1153,24 +1179,26 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jc_bind(c, lguards);
   {
     int fail = jc_exit_label2(c, head, 0, 3); /* تخفي بلا تفريغ: سجلات pv غير محملة بعد والاستئناف من رأس المنطقة */
-    if (c->ng > 0) {
+    if (c->ng > 0 || c->nbi > 0) { /* R13 يلزم أيضاً لمواقع قراءة المدمج (فحص جيل العوالم) */
       jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
       jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
       jx_mov_rm(x, RDI, RSI, (int)offsetof(Dict, e));
-      for (int k = 0; k < c->ng; k++) {
-        int gi = c->ggi[k];
-        jx_cmp32_mi(x, RSI, (int)offsetof(Dict, n), gi + 1); jc_jcc(c, CC_L, fail);
-        jx_cmp32_mi(x, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k), V_OBJ); jc_jcc(c, CC_NE, fail);
-        jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gnames[k]);
-        jx_cmp_rm(x, RAX, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k) + 8); jc_jcc(c, CC_NE, fail);
-      }
-      /* حراسة قيم المستدعين المُدرجين: وسم V_OBJ ومؤشر الـ Closure المتوقع */
-      for (int k = 0; k < c->ng; k++) {
-        if (!c->gexp[k]) continue;
-        int vo = c->ggi[k] * (int)sizeof(Ent) + (int)offsetof(Ent, v);
-        jx_cmp32_mi(x, RDI, vo, V_OBJ); jc_jcc(c, CC_NE, fail);
-        jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[k]);
-        jx_cmp_rm(x, RAX, RDI, vo + 8); jc_jcc(c, CC_NE, fail);
+      if (c->ng > 0) {
+        for (int k = 0; k < c->ng; k++) {
+          int gi = c->ggi[k];
+          jx_cmp32_mi(x, RSI, (int)offsetof(Dict, n), gi + 1); jc_jcc(c, CC_L, fail);
+          jx_cmp32_mi(x, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k), V_OBJ); jc_jcc(c, CC_NE, fail);
+          jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gnames[k]);
+          jx_cmp_rm(x, RAX, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k) + 8); jc_jcc(c, CC_NE, fail);
+        }
+        /* حراسة قيم المستدعين المُدرجين: وسم V_OBJ ومؤشر الـ Closure المتوقع */
+        for (int k = 0; k < c->ng; k++) {
+          if (!c->gexp[k]) continue;
+          int vo = c->ggi[k] * (int)sizeof(Ent) + (int)offsetof(Ent, v);
+          jx_cmp32_mi(x, RDI, vo, V_OBJ); jc_jcc(c, CC_NE, fail);
+          jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gexp[k]);
+          jx_cmp_rm(x, RAX, RDI, vo + 8); jc_jcc(c, CC_NE, fail);
+        }
       }
       jx_mov_rr(x, R13, RDI);
     }

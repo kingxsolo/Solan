@@ -281,7 +281,7 @@ static void dset(Dict *d, Value k, Value v) {
   if (d->n == d->cap) drebuild(d, d->cap == 0 ? 4 : (d->live * 2 >= d->cap ? d->cap * 2 : d->cap));
   uint32_t m = d->icap - 1, j = h & m;
   while (d->idx[j] != -1) j = (j + 1) & m;
-  d->idx[j] = d->n; d->e[d->n].k = k; d->e[d->n].v = v; d->n++; d->live++;
+  d->idx[j] = d->n; d->e[d->n].k = k; d->e[d->n].v = v; d->n++; d->live++; d->gen++; /* gen: جيل الإلحاق — أساس حارس ظلّ المدمج في JIT */
 }
 static bool dget(Dict *d, Value k, Value *out) {
   int x = dfind(d, k, vhash(k)); if (x < 0) return false;
