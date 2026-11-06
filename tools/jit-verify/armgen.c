@@ -148,6 +148,27 @@ int main(void) {
   jx_add_rsp(&x, 160);
   jx_ret(&x);
 
+  /* 13) نوى fnjit-ARM (نمط fc_emit الجديد): برولوج stp x30/xzr + عداد العمق
+     + تخزين الوسائط d0-d7 + استدعاء ذاتي/مساعد + إنزال العمق + إبيلوج */
+  jx_stp_pre64(&x, 30, 31, 336);              /* stp x30, xzr, [sp, #-0x150]! */
+  jx_mov_ri(&x, RAX, 0x00007FF600001C04ull);  /* &g_fj_depth */
+  jx_mov32_rm(&x, RCX, RAX, 0);               /* ldr w1, [x0] */
+  jx_add32_ri(&x, RCX, 1);                    /* add w1, w1, #1 */
+  jx_mov32_mr(&x, RAX, 0, RCX);               /* str w1, [x0] */
+  jx_mov_ri(&x, RDX, 0x00007FF600001C08ull);  /* &g_fj_limit */
+  jx_cmp32_rm(&x, RCX, RDX, 0);               /* ldr w11, [x2]؛ cmp w1, w11 */
+  jx_rel32_jcc(&x, CC_G);                     /* b.gt عنصر نائب (تجاوز الحد → تخفي) */
+  for (int k = 0; k < 8; k++) jx_movsd_mr(&x, RSP, 16 + 8 * k, k); /* وسائط d0-d7 → خلايا */
+  jx_emit(&x, 0x94000000u);                   /* bl عنصر نائب (fc_call ذاتي) */
+  jx_ldi64(&x, 0, 0x00007FF600001234ull);     /* عنوان مساعد (jit_h_mod) */
+  jx_call_rax(&x);                            /* blr x0 */
+  jx_mov32_rm(&x, RCX, RAX, 0);               /* OP_RETURN: قراءة العمق */
+  jx_sub32_ri(&x, RCX, 1);                    /* sub w1, w1, #1 */
+  jx_mov32_mr(&x, RAX, 0, RCX);               /* كتابة العمق */
+  jx_ldr64_raw(&x, 30, 31, 0);                /* ldr x30, [sp] — استعادة LR من [sp+0] */
+  jx_add_rsp(&x, 336);                        /* add sp, sp, #0x150 */
+  jx_ret(&x);
+
   FILE *f = fopen("armgen.bin", "wb");
   if (!f) { fprintf(stderr, "فشل فتح المخرج\n"); return 1; }
   fwrite(x.p, 1, (size_t)x.n, f);

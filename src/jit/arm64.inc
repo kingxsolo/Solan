@@ -241,6 +241,11 @@ static void jx_add32_ri(XB *x, int r, int32_t imm) {
   jx_ldi32(x, (uint32_t)imm);
   jx_emit(x, 0x0B000000u | (16u << 16) | ((uint32_t)jx_g(r) << 5) | (uint32_t)jx_g(r));
 }
+static void jx_sub32_ri(XB *x, int r, int32_t imm) { /* sub wr, wr, #imm (لعداد العمق في fnjit) */
+  if (imm >= 0 && imm <= 4095) { jx_emit(x, 0x51000000u | ((uint32_t)imm << 10) | ((uint32_t)jx_g(r) << 5) | (uint32_t)jx_g(r)); return; }
+  jx_ldi32(x, (uint32_t)imm);
+  jx_emit(x, 0x4B000000u | (16u << 16) | ((uint32_t)jx_g(r) << 5) | (uint32_t)jx_g(r));
+}
 static void jx_and32_ri(XB *x, int r, int32_t imm) {
   jx_ldi32(x, (uint32_t)imm);
   jx_emit(x, 0x0A000000u | (16u << 16) | ((uint32_t)jx_g(r) << 5) | (uint32_t)jx_g(r));
