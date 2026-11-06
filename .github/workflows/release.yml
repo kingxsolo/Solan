@@ -233,17 +233,32 @@ jobs:
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
-      - name: بناء يونيفرسال (Intel + Apple Silicon)
+      - name: بناء يونيفرسال (Intel مع JIT + Apple Silicon)
         run: |
           clang -O2 -Wno-format-truncation \
-              -arch x86_64 -arch arm64 -mmacosx-version-min=11.0 \
+              -arch x86_64 -mmacosx-version-min=11.0 \
               -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
               -DSOLAN_SQLITE_EMBED \
-              -o solan solan.c third_party/sqlite/sqlite3.c -lm
+              -o solan-intel solan.c third_party/sqlite/sqlite3.c -lm
+          clang -O2 -Wno-format-truncation \
+              -arch arm64 -mmacosx-version-min=11.0 \
+              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
+              -DSOLAN_SQLITE_EMBED \
+              -o solan-arm64 solan.c third_party/sqlite/sqlite3.c -lm
+          lipo -create solan-intel solan-arm64 -o solan
           file solan
+          lipo -info solan
 
-      - name: الاختبارات (22)
+      - name: الاختبارات (22) — Apple Silicon الأصلي
         run: ./solan pc/اختبار_ويندوز.سو
+
+      - name: الاختبارات (22) — شريحة Intel مع JIT عبر Rosetta
+        run: |
+          if [ -d /Library/Apple/usr/libexec/oah ]; then
+            arch -x86_64 ./solan pc/اختبار_ويندوز.سو
+          else
+            echo "Rosetta غير متوفرة على هذا العدّاء — تخطي اختبار شريحة Intel"
+          fi
 
       - name: حزمة محمولة
         run: |
@@ -306,8 +321,8 @@ jobs:
           **من المصدر على أي منصة**: `sh install.sh` — يكتشف بيئتك ويبني ويثبّت.
           التفاصيل الكاملة في [INSTALL.md](INSTALL.md).
 
-          - ويندوز 64-بت ولينكس 64-بت: **JIT مفعّل** (حلقات أسرع بعدة مرات)
-          - ويندوز 32-بت وماك وARM: مفسَّر كامل الوظائف
+          - ويندوز 64-بت ولينكس 64-بت وماك Intel: **JIT مفعّل** (حلقات أسرع بعدة مرات)
+          - ويندوز 32-بت وماك Apple Silicon وARM: مفسَّر كامل الوظائف
           - SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً
           EOF
 

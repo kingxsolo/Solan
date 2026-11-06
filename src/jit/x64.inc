@@ -1,5 +1,5 @@
 #ifndef SOLAN_JIT
-#if defined(__x86_64__) && (defined(__linux__) || defined(_WIN32))
+#if defined(__x86_64__) && (defined(__linux__) || defined(_WIN32) || defined(__APPLE__))
 #define SOLAN_JIT 1
 #else
 #define SOLAN_JIT 0
