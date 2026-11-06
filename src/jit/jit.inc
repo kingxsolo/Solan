@@ -1277,11 +1277,12 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   XB *x = &c->x;
 #if JX_ARM
   /* إطار 160 بايت: [0..15] x19,x20 (pre-index) — [16..55] منطقة d3-d7 العابرة —
-     [64..87] x21-x23 — [88..151] d8-d15 الواردة (محفوظة-للمستدعى: حفظ/استعادة إلزاميان) */
+     [64..87] x21-x23 — [88..151] d8-d15 الواردة — [152..159] x30 (LR) */
   jx_stp_pre64(x, 19, 20, 160);
   jx_stp64(x, 21, 22, 31, 64);
   jx_str64_raw(x, 23, 31, 80);
   for (int p = 0; p < 4; p++) jx_stpd(x, 8 + 2 * p, 9 + 2 * p, 31, 88 + 16 * p);
+  jx_str64_raw(x, 30, 31, 152); /* LR: blr المساعدين يسحقها — بلا إنقاذ يعيد ret القفز إلى داخل الكود نفسه (حلقة لانهائية) */
   jx_mov_rr(x, R15, RAX); /* وسيط JitCtx* الأول يصل في x0 */
 #else
   jx_push(x, RBX); jx_push(x, R12); jx_push(x, R13); jx_push(x, R14); jx_push(x, R15);
@@ -1362,6 +1363,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jx_ldp64(x, 21, 22, 31, 64);
   jx_ldr64_raw(x, 23, 31, 80);
   jx_ldp64(x, 19, 20, 31, 0);
+  jx_ldr64_raw(x, 30, 31, 152); /* استعادة LR قبل ret */
   jx_add_rsp(x, 160);
   jx_ret(x);
 #else

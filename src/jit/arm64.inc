@@ -51,20 +51,22 @@ static int jx_armcc(int cc) {
     default: return 6;
   }
 }
-/* شرط x86 → شرط ARM64 بعد fcmp. أعلام fcmp:
-     أكبر: N=0 Z=0 C=0 V=0 | أصغر: N=1 Z=0 C=0 V=0
-     يساوي: N=0 Z=1 C=1 V=0 | unordered: N=1 Z=1 C=1 V=1
-   كل الحالات المرتبة لها V=0، لذا:
-     CC_AE (CF=0: أكبر أو يساوي، بلا unordered) → PL (N=0) — GE كان سيصطاد unordered خطأً
-     CC_B  (CF=1: أصغر أو unordered)            → MI (N=1) — LT كان سيفوّت unordered
+/* شرط x86 → شرط ARM64 بعد fcmp. أعلام fcmp على AArch64 (مختلفة عن x86 — متحقق منها
+   بتنفيذ فعلي على Unicorn):
+     أكبر: N=0 Z=0 C=1 V=0 | أصغر: N=1 Z=0 C=0 V=0
+     يساوي: N=0 Z=1 C=1 V=0 | unordered: N=0 Z=0 C=0 V=1
+   المطابقة لدلالة x86 ucomisd:
+     CC_AE (CF=0: أكبر أو يساوي، بلا unordered) → GE (N==V) — PL كان سيمرّر unordered خطأً
+     CC_B  (CF=1: أصغر أو unordered)            → LT (N!=V) — MI كان سيفوّت unordered
      CC_A  (CF=0 && ZF=0: أكبر فقط)             → GT (Z=0 && N==V)
      CC_BE (CF=1 || ZF=1)                       → LE (Z=1 || N!=V)
-     CC_E/CC_NE/CC_P/CC_NP مطابقة (EQ/NE/VS/VC). */
+   تنبيه: CC_E/CC_NE بعد fcmp تخالف x86 في unordered (Z=0 لا Z=1) — كل مواضعها في
+   jit.inc محروسة بفحص CC_P (VS) قبله أو بنمط setcc(E)&setcc(NP) فتسلك المسار الصحيح. */
 static int jx_armcc_fp(int cc) {
   switch (cc) {
     case CC_A: return 12;  /* GT */
-    case CC_AE: return 5;  /* PL */
-    case CC_B: return 4;   /* MI */
+    case CC_AE: return 10; /* GE */
+    case CC_B: return 11;  /* LT */
     case CC_BE: return 13; /* LE */
     default: return jx_armcc(cc);
   }
@@ -81,10 +83,10 @@ static int jx_g(int r) {
   return m[r & 15];
 }
 
-/* تحميل فوري 32-بت في w16: movz دائماً ثم movk إن لزم الجزء العلوي */
+/* تحميل فوري 32-بت في w16: movz دائماً ثم movk للجزء العلوي (hw=1 → lsl #16) */
 static void jx_ldi32(XB *x, uint32_t u) {
   jx_emit(x, 0x52800000u | ((u & 0xFFFFu) << 5) | 16u);
-  if (u >> 16) jx_emit(x, 0x72800000u | ((u >> 16) << 5) | 16u);
+  if (u >> 16) jx_emit(x, 0x72800000u | (1u << 21) | ((u >> 16) << 5) | 16u);
 }
 /* تحميل فوري 64-بت في سجل ARM مباشر: movz بأول جزء غير صفري ثم movk للبقية */
 static void jx_ldi64(XB *x, int rd, uint64_t imm) {
