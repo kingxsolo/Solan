@@ -212,6 +212,10 @@ static int jc_flow(JC *c) {
         if (i + 1 < c->n) { succ[ns] = i + 1; sd[ns++] = nd; }
         if (in->tgt >= 0) { succ[ns] = in->tgt; sd[ns++] = d; }
         break;
+      case OP_RFOR: /* خروج الحلقة الشرطي قد يقع داخل المنطقة (حلقة متداخلة): عمقه = عمق الدخول بلا دفع قيم الحلقة */
+        if (i + 1 < c->n) { succ[ns] = i + 1; sd[ns++] = nd; }
+        if (in->tgt >= 0) { succ[ns] = in->tgt; sd[ns++] = d; }
+        break;
       default: if (i + 1 < c->n) { succ[ns] = i + 1; sd[ns++] = nd; }
     }
     for (int k = 0; k < ns; k++) {
@@ -731,9 +735,13 @@ static void jc_promote(JC *c) {
     }
     for (int k = 0; k < nvr; k++) {
       int idx = c->spoff + d + k, f = -1; /* العمق d+k يوافق السلوت المحلي spoff+d+k (R12 = RBX + spoff*16) */
+      /* وجهة لا تُقرأ في الجسم إطلاقاً: بلا سجل — الكتابة للذاكرة تكفي، والسجل يُحرَّر لمتغير حارق
+         تُكلف إقامته في الذاكرة أغلى بكثير (عالم بقراءة+كتابة ≈ 8 عمليات ذاكرة كل تكرار) */
+      int reads = 0;
+      for (int q = 0; q < c->n; q++) { if (c->reach[q] && c->ins[q].op == OP_GET_LOCAL && c->ins[q].a == idx) reads++; }
       for (int q = 0; q < nc; q++) if (!cand[q].g && cand[q].idx == idx) { f = q; break; }
       if (f < 0) { if (nc >= 64) continue; f = nc++; cand[f].g = 0; cand[f].idx = idx; cand[f].gi = 0; cand[f].uses = 0; cand[f].reg = 0; cand[f].noc = 1; cand[f].ok = 1; }
-      cand[f].uses += 50;
+      cand[f].uses += reads > 0 ? 50 : 0;
     }
   }
   for (int k = 0; k < nc; k++) if (!cand[k].ok) { cand[k] = cand[nc - 1]; nc--; k--; }
@@ -813,7 +821,17 @@ static void jc_gen_body(JC *c) {
     switch ((Op)in->op) {
       case OP_CONST: {
         Value v = jc_kc(c, in)[in->a];
-        if (IS_NUM(v)) { c->sd[d] = sd_mk(SK_CONST); memcpy(&c->sd[d].bits, &v.as.n, 8); }
+        if (IS_NUM(v)) {
+          /* ثابت آلية حلقة داخل المنطقة (عدّاد/عدد/أ): حدّث سجل المتغير المُرقّى أيضاً —
+             RFOR/RFOREP يقرآن السجل لا الذاكرة، وترك السجل قديماً يُبطل تصفير العدّاد كل تكرار خارجي */
+          int pk = jc_find_pv(c, 0, c->spoff + d);
+          if (pk >= 0) {
+            uint64_t bts; memcpy(&bts, &v.as.n, 8);
+            if (bts == 0) jx_xorpd(x, c->pv[pk].reg, c->pv[pk].reg);
+            else { jx_mov_ri(x, RAX, bts); jx_movq_xr(x, c->pv[pk].reg, RAX); }
+            c->sd[d] = sd_mk(SK_VAR); c->sd[d].r = (uint8_t)c->pv[pk].reg; c->sd[d].var = pk;
+          } else { c->sd[d] = sd_mk(SK_CONST); memcpy(&c->sd[d].bits, &v.as.n, 8); }
+        }
         else if (IS_T(v, O_STR)) { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)v.as.o); jx_mov_mr(x, R12, d * 16 + 8, RAX); jc_settag(c, d, V_OBJ); c->sd[d] = sd_mk(SK_MEM); }
         else { c->failed = 1; c->why = "const"; }
         break;
@@ -1052,6 +1070,44 @@ static void jc_gen_body(JC *c) {
         for (int k = 0; k < nv; k++) { jx_movsd_mr(x, R12, (d + k) * 16 + 8, 3); jc_settag(c, d + k, V_NUM); }
         jc_bind(c, done);
         for (int k = 0; k < nv; k++) c->sd[d + k] = sd_mk(SK_MEM);
+        break;
+      }
+      case OP_RFOREP: {
+        /* تهيئة حلقة مدى متداخلة داخل المنطقة (كالمفسّر): flag=1: n=ceil(ب−أ) تُكتب في base+1 — flag=0: تنقيح العدد في base */
+        jc_canon(c, 0, d);
+        int base = in->a, flag = in->b;
+        int dl = jc_deopt(c, i, d);
+        int ak = jc_find_pv(c, 0, base), wk = jc_find_pv(c, 0, base + 1); /* أ/العدد و ب/العدّاد */
+        /* فحصا الوسم كلاهما كالمفسّر: المُرقّى في سجل pv عددٌ ضمناً — وإلا فحص الوسم في ذاكرة الإطار */
+        if (ak < 0) { jx_cmp32_mi(x, RBX, base * 16, V_NUM); jc_jcc(c, CC_NE, dl); }
+        if (wk < 0) { jx_cmp32_mi(x, RBX, (base + 1) * 16, V_NUM); jc_jcc(c, CC_NE, dl); }
+        int t = 3, z = 4; /* بعد التمهيد كل المؤقتات حرّة — نمط RFOR نفسه (XMM3/XMM4) */
+        if (ak >= 0) jx_movaps(x, t, c->pv[ak].reg);
+        else jx_movsd_rm(x, t, RBX, base * 16 + 8);
+        if (flag) { /* n = ceil(ب − أ) */
+          if (wk >= 0) jx_movaps(x, z, c->pv[wk].reg);
+          else jx_movsd_rm(x, z, RBX, (base + 1) * 16 + 8);
+          jx_subsd(x, z, t);
+          jx_roundsd(x, z, z, 0x0A); /* تقريب للسقف */
+        } else jx_movaps(x, z, t); /* n = العدد نفسه */
+        jx_xorpd(x, t, t); /* 0.0 */
+        jx_ucomisd(x, z, t);
+        int ok = jc_new_label(c);
+        jc_jcc(c, CC_A, ok); /* n > 0 ترتيبياً: أبقِه — inf يبقى حلقة لا نهائية كالمفسّر */
+        jx_movaps(x, z, t);  /* NaN والسالب والصفر → 0 */
+        jc_bind(c, ok);
+        int dst = flag ? base + 1 : base, dk = jc_find_pv(c, 0, dst);
+        { /* السلوت يوافق عمقاً في المكدس (القيم دُفعت داخل المنطقة): حدّث الحالة الرمزية وإلا
+             أعاد canon في RFOR التالية كتابة القيمة القديمة فوق العدد المحسوب */
+          int dd2 = dst - c->spoff;
+          if (dd2 >= 0 && dd2 < d) {
+            if (dk >= 0) { c->sd[dd2] = sd_mk(SK_VAR); c->sd[dd2].r = (uint8_t)c->pv[dk].reg; c->sd[dd2].var = dk; }
+            else c->sd[dd2] = sd_mk(SK_MEM);
+            c->sd[dd2].n = 1;
+          }
+        }
+        if (dk >= 0) jx_movaps(x, c->pv[dk].reg, z); /* العدد في سجل المتغير المُرقّى */
+        else jx_movsd_mr(x, RBX, dst * 16 + 8, z);   /* الوسم V_NUM ثابت قبل وبعد — بلا كتابة وسم */
         break;
       }
       case OP_RFOR: {
