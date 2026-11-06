@@ -3,7 +3,9 @@
 ;  يثبّت solan.exe، يضيفه إلى PATH، ينشئ اختصارات، ويدعم إزالة التثبيت
 ;  البناء: ISCC pc\installer.iss /DExeName=dist\solan.exe
 ; =====================================================================
+#ifndef SolanVersion
 #define SolanVersion "1.1.0"
+#endif
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"
 

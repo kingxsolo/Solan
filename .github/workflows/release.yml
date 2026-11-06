@@ -1,0 +1,318 @@
+# =====================================================================
+#  سولان — بناء واختبار وإصدار على كل المنصات
+#  - كل دفع: يبني ويختبر (ويندوز 64+32، لينكس ثابت، ماك يونيفرسال)
+#  - وسم v* : يبني المُثبِّتات الأصلية وينشر إصداراً بكل الملفات
+#  الحزم الناتجة: Setup.exe (ويندوز) + zip 64/32 + tar.gz لينكس ثابت
+#  + deb + rpm + pkg ماك + tar.gz ماك — كلها بلا أي متطلبات خارجية
+# =====================================================================
+name: بناء-وإصدار
+
+on:
+  push:
+    branches: [main, pc-edition]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  #  ويندوز: بناء أصلي 64-بت و32-بت + اختبارات + مُثبِّت عربي (x64)
+  # ------------------------------------------------------------------
+  windows:
+    name: ويندوز ${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: ucrt64
+            pkg: mingw-w64-ucrt-x86_64-gcc
+          - arch: x86
+            msystem: mingw32
+            pkg: mingw-w64-i686-gcc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تجهيز مترجم مينغو-و64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          release: false
+          install: ${{ matrix.pkg }}
+
+      - name: استخراج رقم الإصدار
+        shell: msys2 {0}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v*) VER="${GITHUB_REF_NAME#v}" ;;
+            *)  VER="1.1.0" ;;
+          esac
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - name: بناء (SQLite مضمّنة)
+        shell: msys2 {0}
+        run: |
+          gcc -O2 -Wno-format-truncation \
+              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
+              -DSOLAN_SQLITE_EMBED -D_WIN32_WINNT=0x0A00 \
+              -o solan.exe solan.c third_party/sqlite/sqlite3.c \
+              -lws2_32 -lshell32 -ladvapi32 -lm
+
+      - name: الاختبارات (22)
+        shell: msys2 {0}
+        run: ./solan.exe pc/اختبار_ويندوز.سو
+
+      - name: حزمة محمولة
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path حزمة | Out-Null
+          Copy-Item solan.exe حزمة/
+          Copy-Item README-PC.md, LICENSE حزمة/
+          Compress-Archive -Path حزمة/* -DestinationPath "Solan-$env:VER-windows-${{ matrix.arch }}.zip" -Force
+
+      - name: المُثبِّت العربي Setup.exe (x64 فقط)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc /DExeName=solan.exe "/DSolanVersion=$env:VER" pc/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "فشل بناء المُثبِّت" }
+
+      - name: رفع المخرجات
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            Solan-*-windows-*.zip
+            dist/Solan-*-Setup-x64.exe
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  #  لينكس: ملف تنفيذي ثابت (musl) يعمل على أي توزيعة بلا مكتبات
+  # ------------------------------------------------------------------
+  linux:
+    name: لينكس x64 ثابت
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: مترجم musl (للربط الثابت)
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: استخراج رقم الإصدار
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v*) VER="${GITHUB_REF_NAME#v}" ;;
+            *)  VER="1.1.0" ;;
+          esac
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - name: بناء ثابت (SQLite مضمّنة)
+        run: |
+          musl-gcc -O2 -Wno-format-truncation -static \
+              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
+              -DSOLAN_SQLITE_EMBED \
+              -o solan solan.c third_party/sqlite/sqlite3.c -lm
+
+      - name: الاختبارات (22)
+        run: ./solan pc/اختبار_ويندوز.سو
+
+      - name: حزمة محمولة
+        run: |
+          mkdir -p "حزمة/Solan-$VER-linux-x64"
+          cp solan README.md LICENSE INSTALL.md "حزمة/Solan-$VER-linux-x64/"
+          tar czf "Solan-$VER-linux-x64.tar.gz" -C حزمة "Solan-$VER-linux-x64"
+
+      - name: رفع المخرجات
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: Solan-*-linux-x64.tar.gz
+
+  # ------------------------------------------------------------------
+  #  حزم لينكس الأصلية: deb (ديبيان/أوبونتو) و rpm (فيدورا/ريد هات)
+  # ------------------------------------------------------------------
+  linux-pkg:
+    name: حزم لينكس deb و rpm
+    needs: linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: مدخل
+
+      - name: فك الحزمة
+        run: |
+          VER=$(ls مدخل/Solan-*-linux-x64.tar.gz | head -n1 | sed 's/.*Solan-\(.*\)-linux-x64.tar.gz/\1/')
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          tar xzf "مدخل/Solan-$VER-linux-x64.tar.gz" -C مدخل
+
+      - name: بناء deb
+        run: |
+          mkdir -p deb/DEBIAN deb/usr/bin deb/usr/share/doc/solan
+          install -m755 "مدخل/Solan-$VER-linux-x64/solan" deb/usr/bin/solan
+          install -m644 "مدخل/Solan-$VER-linux-x64/LICENSE" deb/usr/share/doc/solan/copyright
+          cat > deb/DEBIAN/control <<EOF
+          Package: solan
+          Version: $VER
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Solan Project <pc@solan.local>
+          Description: سولان — لغة برمجة عربية
+           ملف تنفيذي ثابت لا يحتاج أي مكتبات خارجية. يدعم JIT على x86-64.
+          EOF
+          dpkg-deb --build --root-owner-group deb "solan_${VER}_amd64.deb"
+
+      - name: بناء rpm
+        run: |
+          sudo apt-get install -y rpm
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          tar czf "rpmbuild/SOURCES/solan-$VER.tar.gz" -C "مدخل/Solan-$VER-linux-x64" solan
+          cat > rpmbuild/SPECS/solan.spec <<EOF
+          Name:           solan
+          Version:        $VER
+          Release:        1%{?dist}
+          Summary:        سولان — لغة برمجة عربية
+          License:        MIT
+          URL:            https://github.com/kingxsolo/Solan
+          Source0:        solan-%{version}.tar.gz
+          BuildArch:      x86_64
+          AutoReqProv:    no
+          %description
+          ملف تنفيذي ثابت لا يحتاج أي مكتبات خارجية. يدعم JIT على x86-64.
+          %prep
+          %setup -q
+          %install
+          install -Dm755 solan %{buildroot}/usr/bin/solan
+          %files
+          /usr/bin/solan
+          EOF
+          rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/solan.spec
+          cp rpmbuild/RPMS/x86_64/solan-$VER-1*.x86_64.rpm .
+
+      - name: رفع المخرجات
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-pkg
+          path: |
+            solan_*_amd64.deb
+            solan-*.x86_64.rpm
+
+  # ------------------------------------------------------------------
+  #  ماك: ملف يونيفرسال (Intel + Apple Silicon) + مُثبِّت pkg
+  # ------------------------------------------------------------------
+  macos:
+    name: ماك يونيفرسال
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: استخراج رقم الإصدار
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v*) VER="${GITHUB_REF_NAME#v}" ;;
+            *)  VER="1.1.0" ;;
+          esac
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - name: بناء يونيفرسال (Intel + Apple Silicon)
+        run: |
+          clang -O2 -Wno-format-truncation \
+              -arch x86_64 -arch arm64 -mmacosx-version-min=11.0 \
+              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
+              -DSOLAN_SQLITE_EMBED \
+              -o solan solan.c third_party/sqlite/sqlite3.c -lm
+          file solan
+
+      - name: الاختبارات (22)
+        run: ./solan pc/اختبار_ويندوز.سو
+
+      - name: حزمة محمولة
+        run: |
+          mkdir -p "حزمة/Solan-$VER-macos"
+          cp solan README.md LICENSE INSTALL.md "حزمة/Solan-$VER-macos/"
+          tar czf "Solan-$VER-macos-universal.tar.gz" -C حزمة "Solan-$VER-macos"
+
+      - name: المُثبِّت pkg
+        run: |
+          mkdir -p pkgroot/usr/local/bin
+          cp solan pkgroot/usr/local/bin/
+          pkgbuild --root pkgroot \
+                   --identifier io.github.kingxsolo.solan \
+                   --version "$VER" \
+                   --install-location / \
+                   "solan-core-$VER.pkg"
+          productbuild --package "solan-core-$VER.pkg" \
+                       --identifier io.github.kingxsolo.solan \
+                       "Solan-$VER-macos.pkg"
+
+      - name: رفع المخرجات
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            Solan-*-macos-universal.tar.gz
+            Solan-*-macos.pkg
+
+  # ------------------------------------------------------------------
+  #  النشر: عند وسم v* فقط — يجمع كل المخرجات وينشر الإصدار
+  # ------------------------------------------------------------------
+  release:
+    name: نشر الإصدار
+    needs: [windows, linux, linux-pkg, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: إصدار
+          merge-multiple: true
+
+      - name: ملاحظات الإصدار
+        run: |
+          cat > ملاحظات.md <<'EOF'
+          ## سولان — التثبيت حسب منصتك
+
+          | منصتك | الملف | الطريقة |
+          |---|---|---|
+          | ويندوز 64-بت | `Solan-*-Setup-x64.exe` | شغّله واتبع الخطوات (واجهة عربية: PATH + ربط الملفات + إزالة تثبيت) |
+          | ويندوز (بدون تثبيت) | `Solan-*-windows-x64.zip` / `x86.zip` | فك الضغط وشغّل `solan.exe` |
+          | لينكس (أي توزيعة) | `Solan-*-linux-x64.tar.gz` | `tar xzf` ثم انسخ `solan` إلى `~/.local/bin` — **ثابت، بلا أي مكتبات** |
+          | أوبونتو/ديبيان | `solan_*_amd64.deb` | `sudo apt install ./الملف.deb` |
+          | فيدورا/ريد هات | `solan-*.x86_64.rpm` | `sudo rpm -i الملف.rpm` أو `sudo dnf install ./الملف.rpm` |
+          | ماك (Intel + Apple Silicon) | `Solan-*-macos.pkg` | شغّله — يثبّت في `/usr/local/bin` (إن منع الماك: زر يمين ← فتح) |
+          | ماك (بدون تثبيت) | `Solan-*-macos-universal.tar.gz` | فك الضغط وشغّل `solan` |
+          | ترمكس (أندرويد) | — | `pkg install -y clang git` ثم `git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh` (بناء من المصدر داخل ترمكس، دقائق قليلة) |
+
+          **من المصدر على أي منصة**: `sh install.sh` — يكتشف بيئتك ويبني ويثبّت.
+          التفاصيل الكاملة في [INSTALL.md](INSTALL.md).
+
+          - ويندوز 64-بت ولينكس 64-بت: **JIT مفعّل** (حلقات أسرع بعدة مرات)
+          - ويندوز 32-بت وماك وARM: مفسَّر كامل الوظائف
+          - SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً
+          EOF
+
+      - name: نشر الإصدار
+        uses: softprops/action-gh-release@v2
+        with:
+          files: إصدار/*
+          body_path: ملاحظات.md
