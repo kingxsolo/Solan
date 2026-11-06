@@ -2,6 +2,10 @@
 #define JIT_READY 0xFFFD
 #define JIT_OFF 0xFFFE
 #define JIT_MAX_DEOPT 200
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#include <pthread.h>
+extern void pthread_jit_write_protect_np(int) __attribute__((weak_import)); /* ماك 11.3+ فقط — يُفحص وجوده وقت التشغيل */
+#endif
 
 typedef struct JitCtx { Value *slots; Value *sp; Closure *clo; const uint8_t *ip; int code; } JitCtx;
 typedef void (*JitFn)(JitCtx *);
@@ -84,7 +88,12 @@ static int jc_new_label(JC *c) { if (c->nlab >= JMAXLAB) { c->failed = 1; c->why
 static void jc_bind(JC *c, int l) { c->lpos[l] = c->x.n; }
 static void jc_fixup(JC *c, int l) {
   if (c->nfix >= JMAXFIX) { c->failed = 1; c->why = "fixups"; return; }
-  c->fix[c->nfix].pos = c->x.n; c->fix[c->nfix].lab = l; c->nfix++; xb_u32(&c->x, 0);
+  c->fix[c->nfix].pos = c->x.n; c->fix[c->nfix].lab = l; c->nfix++;
+#if JX_ARM
+  /* التعليمة نفسها (4 بايت صادرة للتو) هي العنصر النائب — حلقة الترقيع تعدّل حقولها */
+#else
+  xb_u32(&c->x, 0);
+#endif
 }
 static void jc_jmp(JC *c, int l) { jx_rel32_jmp(&c->x); jc_fixup(c, l); }
 static void jc_jcc(JC *c, int cc, int l) { jx_rel32_jcc(&c->x, cc); jc_fixup(c, l); }
@@ -412,8 +421,15 @@ static int jc_pool(JC *c, uint64_t bits) {
 }
 static void jc_rip(JC *c, int pfx, int op, int reg, int lab) {
   XB *x = &c->x;
+#if JX_ARM
+  /* تحميل ثابت من البركة: LDR literal (imm19 عنصر نائب تُرقَّعه حلقة الترقيع) */
+  if (op == 0x0F10) jx_emit(x, 0x5C000000u | (uint32_t)reg); /* ldr d{reg}, lit */
+  else { jx_emit(x, 0x5C000000u | 16u); jx_sse_rr(x, pfx, op, reg, 16); } /* ldr d16, lit ثم العملية */
+  jc_fixup(c, lab);
+#else
   if (pfx) xb_b(x, pfx);
   jx_rex(x, 0, reg, 0, 0); jx_opc(x, op); xb_b(x, ((reg & 7) << 3) | 5); jc_fixup(c, lab);
+#endif
 }
 static void jc_settag(JC *c, int pos, int tag) { jx_mov32_mi(&c->x, EM(pos), tag); }
 
@@ -495,16 +511,27 @@ static void jc_op_rm(JC *c, int pfx, int op, int dst, int pos) {
 static void jc_flush_vars(JC *c) {
   for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); jx_movsd_mr(&c->x, b, d + 8, c->pv[k].reg); }
 }
+#if JX_ARM
+/* d0-d2 مخطوطات صرفة، d3-d7 مؤقتات/متغيرات caller-saved تُنقذ حول المساعدين،
+   d8-d15 محفوظة-للمستدعى أصلاً فلا حاجة لنقذها هنا (البرولوج ينقذها للمستدعى الأعلى).
+   منطقة الإطار [16..55] مخصصة لهذا الغرض (انظر البرولوج). */
+static void jc_save_regs(JC *c) { for (int r = 3; r <= 7; r++) jx_movsd_mr(&c->x, RSP, 16 + (r - 3) * 8, r); }
+static void jc_restore_regs(JC *c) { for (int r = 3; r <= 7; r++) jx_movsd_rm(&c->x, r, RSP, 16 + (r - 3) * 8); }
+#else
 static void jc_save_regs(JC *c) { for (int r = 3; r <= 15; r++) jx_movsd_mr(&c->x, RSP, (r - 3) * 8, r); }
 static void jc_restore_regs(JC *c) { for (int r = 3; r <= 15; r++) jx_movsd_rm(&c->x, r, RSP, (r - 3) * 8); }
+#endif
 static void jc_call_helper(JC *c, void *fn) {
   jc_save_regs(c);
-#if JX_WIN
+#if JX_ARM
+  jx_ldi64(&c->x, 15, (uint64_t)(uintptr_t)fn); /* x15 = عنوان المساعد (عابرة، لا x16/x17 المحجوزتين للقشور) */
+  jx_blr(&c->x, 15); /* sp متحاذى 16 أصلاً (الإطار 160) — لا مساحة ظل على ARM */
+#elif JX_WIN
   jx_sub_rsp(&c->x, 32); /* مساحة الظل التي يتوقعها المستدعى على ويندوز */
-#endif
   jx_mov_ri(&c->x, RAX, (uint64_t)(uintptr_t)fn); jx_call_rax(&c->x);
-#if JX_WIN
   jx_add_rsp(&c->x, 32);
+#else
+  jx_mov_ri(&c->x, RAX, (uint64_t)(uintptr_t)fn); jx_call_rax(&c->x);
 #endif
   jc_restore_regs(c);
 }
@@ -646,9 +673,21 @@ static void jc_mod(JC *c, int i, int d) {
     jx_cmp32_ri(x, RCX, -1); jc_jcc(c, CC_NE, k);
     jx_xorpd(x, t, t); jc_jmp(c, done);
     jc_bind(c, k);
+#if JX_ARM
+    jx_sdiv32(x, RDX, RAX, RCX);      /* w2 = w0 / w1 (يقتطع كالـidiv تماماً) */
+    jx_msub32(x, RDX, RDX, RCX, RAX); /* w2 = w0 - w2*w1 = الباقي المقتطع */
+#else
     jx_cdq(x); jx_idiv32(x, RCX);
+#endif
     jx_test32_rr(x, RDX, RDX); jc_jcc(c, CC_E, res);
+#if JX_ARM
+    jx_alu32_rr(x, 0x89, RAX, RDX); /* mov */
+    jx_alu32_rr(x, 0x31, RAX, RCX); /* eor — على ARM لا يضبط الأعلام فنُعيد الفحص بـtst */
+    jx_test32_rr(x, RAX, RAX);      /* N = إشارة (rem ^ b) */
+    jc_jcc(c, CC_NS, res);
+#else
     jx_alu32_rr(x, 0x89, RAX, RDX); jx_alu32_rr(x, 0x31, RAX, RCX); jc_jcc(c, CC_NS, res);
+#endif
     jx_alu32_rr(x, 0x01, RDX, RCX);
     jc_bind(c, res);
     jx_cvtsi2sd32(x, t, RDX); jc_jmp(c, done);
@@ -1182,10 +1221,24 @@ static void jc_gen_body(JC *c) {
         }
         int ex2 = jc_exit_label2(c, cip, cdep, 2); /* استثناء: بلا تفريغ */
         int ex3 = jc_exit_label2(c, rip, cdep, 3); /* تخفي بعد الاستدعاء: المكدس صحيح */
+#if JX_ARM
+        /* SysV ARM64: x0-x3 = (cx, sp, argc, cip) */
+        jx_mov_rr(x, RAX, R15);
+        jx_lea(x, RCX, R12, -1, 0, d * 16);
+        jx_mov_ri(x, RDX, (uint64_t)argc);
+        jx_mov_ri(x, RSI, (uint64_t)(uintptr_t)cip);
+#elif JX_WIN
         jx_mov_rr(x, RCX, R15);
         jx_lea(x, RDX, R12, -1, 0, d * 16);
         jx_mov_ri(x, R8, (uint64_t)argc);
         jx_mov_ri(x, R9, (uint64_t)(uintptr_t)cip);
+#else
+        /* SysV x64: RDI, RSI, RDX, RCX (إصلاح خلل كامن: كان يمرر ترتيب ويندوز دائماً) */
+        jx_mov_rr(x, RDI, R15);
+        jx_lea(x, RSI, R12, -1, 0, d * 16);
+        jx_mov_ri(x, RDX, (uint64_t)argc);
+        jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)cip);
+#endif
         jc_call_helper(c, (void *)jit_h_call);
         jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
         if (c->ng > 0 || c->nbi > 0) { /* إعادة اشتقاق R13: القاموس قد نما (فحص الجيل يقرأ من R13) */
@@ -1222,6 +1275,15 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   for (int i = 0; i < c->n; i++) { c->lpos[i] = -1; c->dl[i] = -1; }
   jc_promote(c);
   XB *x = &c->x;
+#if JX_ARM
+  /* إطار 160 بايت: [0..15] x19,x20 (pre-index) — [16..55] منطقة d3-d7 العابرة —
+     [64..87] x21-x23 — [88..151] d8-d15 الواردة (محفوظة-للمستدعى: حفظ/استعادة إلزاميان) */
+  jx_stp_pre64(x, 19, 20, 160);
+  jx_stp64(x, 21, 22, 31, 64);
+  jx_str64_raw(x, 23, 31, 80);
+  for (int p = 0; p < 4; p++) jx_stpd(x, 8 + 2 * p, 9 + 2 * p, 31, 88 + 16 * p);
+  jx_mov_rr(x, R15, RAX); /* وسيط JitCtx* الأول يصل في x0 */
+#else
   jx_push(x, RBX); jx_push(x, R12); jx_push(x, R13); jx_push(x, R14); jx_push(x, R15);
 #if JX_WIN
   /* على ويندوز RSI وRDI محفوظتان (callee-saved) يجب إرجاعهما كما استُقبلتا */
@@ -1238,6 +1300,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jx_mov_rr(x, R15, RCX);
 #else
   jx_mov_rr(x, R15, RDI);
+#endif
 #endif
   jx_mov_rm(x, RBX, R15, (int)offsetof(JitCtx, slots)); jx_mov_rm(x, R12, R15, (int)offsetof(JitCtx, sp)); jx_mov_rm(x, R14, R15, (int)offsetof(JitCtx, clo));
   int lguards = jc_new_label(c), lbody = jc_new_label(c), lepi = jc_new_label(c);
@@ -1294,6 +1357,14 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
     jc_jmp(c, lepi);
   }
   jc_bind(c, lepi);
+#if JX_ARM
+  for (int p = 3; p >= 0; p--) jx_ldpd(x, 8 + 2 * p, 9 + 2 * p, 31, 88 + 16 * p);
+  jx_ldp64(x, 21, 22, 31, 64);
+  jx_ldr64_raw(x, 23, 31, 80);
+  jx_ldp64(x, 19, 20, 31, 0);
+  jx_add_rsp(x, 160);
+  jx_ret(x);
+#else
 #if JX_WIN
   /* استعادة XMM6-15 كما استُقبلت من الـ VM */
   for (int r = 6; r <= 15; r++) jx_movsd_rm(x, r, RSP, 112 + (r - 6) * 8);
@@ -1303,19 +1374,50 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jx_pop(x, RSI); jx_pop(x, RDI);
 #endif
   jx_pop(x, R15); jx_pop(x, R14); jx_pop(x, R13); jx_pop(x, R12); jx_pop(x, RBX); jx_ret(x);
+#endif
+#if JX_ARM
+  if (c->x.n & 7) xb_u32(x, 0); /* محاذاة 8 للبركة: LDR literal D يتطلب محاذاة طبيعية */
+#endif
   for (int k = 0; k < c->npool; k++) { jc_bind(c, c->poollab[k]); xb_u64(x, c->pool[k]); }
   if (c->x.n > c->x.cap || c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] فشل: %s\n", c->why ? c->why : "حجم"); goto out; }
+#if JX_ARM
+  for (int k = 0; k < c->nfix; k++) {
+    int tp = c->lpos[c->fix[k].lab];
+    if (tp < 0) { if (g_jit_trace) fprintf(stderr, "[jit] تسمية غير مربوطة\n"); goto out; }
+    /* pos-4 = بداية تعليمة الترقيع (b/b.cond/ldr literal)؛ rel بالتعليمات = (tp - ipos)/4 */
+    int ipos = c->fix[k].pos - 4;
+    int32_t rel = tp - ipos;
+    uint32_t w; memcpy(&w, c->x.p + ipos, 4);
+    if ((w >> 26) == 5u) w = 0x14000000u | ((uint32_t)(rel / 4) & 0x3FFFFFFu);             /* b: imm26 */
+    else w = (w & ~0x00FFFFE0u) | (((uint32_t)(rel / 4) & 0x7FFFFu) << 5);                 /* b.cond: imm19 مع حفظ cond / ldr literal: حفظ Rt */
+    memcpy(c->x.p + ipos, &w, 4);
+  }
+#else
   for (int k = 0; k < c->nfix; k++) {
     int tp = c->lpos[c->fix[k].lab];
     if (tp < 0) { if (g_jit_trace) fprintf(stderr, "[jit] تسمية غير مربوطة\n"); goto out; }
     int32_t rel = tp - (c->fix[k].pos + 4); memcpy(c->x.p + c->fix[k].pos, &rel, 4);
   }
+#endif
   {
     size_t sz = ((size_t)c->x.n + 4095) & ~(size_t)4095;
     if (g_jit_bytes + sz > (64u << 20)) goto out;
-    void *mem = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    int mflags = MAP_PRIVATE | MAP_ANONYMOUS;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    mflags |= MAP_JIT; /* Apple Silicon: تنفيذ من صفحات قابلة للكتابة يتطلب MAP_JIT */
+#endif
+    void *mem = mmap(NULL, sz, PROT_READ | PROT_WRITE, mflags, -1, 0);
     if (mem == MAP_FAILED) goto out;
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(0); /* فتح الكتابة مؤقتاً */
+#endif
     memcpy(mem, c->x.p, (size_t)c->x.n);
+#if JX_ARM
+    __builtin___clear_cache((char *)mem, (char *)mem + sz); /* إبطال ذاكرة التعليمات بعد النسخ */
+#endif
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(1); /* إغلاق الكتابة مجدداً */
+#endif
     if (mprotect(mem, sz, PROT_READ | PROT_EXEC) != 0) { munmap(mem, sz); g_jit = 0; goto out; }
     res = calloc(1, sizeof(JitRegion));
     res->tail = tail; res->fn = (JitFn)mem; res->mem = mem; res->msz = sz; res->next = fn->jreg; fn->jreg = res; g_jit_bytes += sz;
@@ -1338,8 +1440,17 @@ static void jit_init(void) {
   const char *e = getenv("SOLAN_JIT");
   g_jit = !(e && e[0] == '0');
   g_jit_trace = getenv("SOLAN_JIT_TRACE") != NULL;
+#if JX_ARM
+  /* AArch64: FP/NEON مضمونة في المستوى الأساسي للمعمارية — لا فحص قدرات.
+     وأمان: إن أُجبر SOLAN_JIT=2 على مضيف غير ARM (فحص ترجمة) فاعقله —
+     تنفيذ بايتات ARM على x86 مستحيل. */
+#if !defined(__aarch64__) && !defined(__arm64__)
+  g_jit = 0;
+#endif
+#else
   __builtin_cpu_init();
   if (!__builtin_cpu_supports("sse4.1")) g_jit = 0;
+#endif
 }
 #else
 static void jit_init(void) { g_jit = 0; }

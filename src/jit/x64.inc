@@ -1,18 +1,16 @@
 #ifndef SOLAN_JIT
 #if defined(__x86_64__) && (defined(__linux__) || defined(_WIN32) || defined(__APPLE__))
 #define SOLAN_JIT 1
+#elif (defined(__aarch64__) || defined(__arm64__)) && (defined(__linux__) || defined(__APPLE__))
+#define SOLAN_JIT 2
 #else
 #define SOLAN_JIT 0
 #endif
 #endif
 
 #if SOLAN_JIT
-/* اتفاقية استدعاء ويندوز x64: الوسيط الأول في RCX، وRSI/RDI محفوظة، وXMM6-15 محفوظة، وتلزم مساحة ظل 32 بايت */
-#if defined(_WIN32)
-#define JX_WIN 1
-#else
-#define JX_WIN 0
-#endif
+/* تعريفات مشتركة بين المُرمِّزين: فهارس السجلات المجردة وشروط x86 وبفر المخرجات.
+   arm64.inc يترجم هذه الفهارس إلى سجلات AArch64 داخلياً. */
 enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 };
 enum { CC_O, CC_NO, CC_B, CC_AE, CC_E, CC_NE, CC_BE, CC_A, CC_S, CC_NS, CC_P, CC_NP, CC_L, CC_GE, CC_LE, CC_G };
 
@@ -22,6 +20,13 @@ static void xb_b(XB *x, int v) { if (x->n < x->cap) x->p[x->n] = (uint8_t)v; x->
 static void xb_u32(XB *x, uint32_t v) { for (int i = 0; i < 4; i++) xb_b(x, (v >> (8 * i)) & 0xFF); }
 static void xb_u64(XB *x, uint64_t v) { for (int i = 0; i < 8; i++) xb_b(x, (int)((v >> (8 * i)) & 0xFF)); }
 
+#if SOLAN_JIT == 1
+/* اتفاقية استدعاء ويندوز x64: الوسيط الأول في RCX، وRSI/RDI محفوظة، وXMM6-15 محفوظة، وتلزم مساحة ظل 32 بايت */
+#if defined(_WIN32)
+#define JX_WIN 1
+#else
+#define JX_WIN 0
+#endif
 static void jx_rex(XB *x, int w, int r, int xi, int b) {
   int v = 0x40 | (w ? 8 : 0) | ((r & 8) ? 4 : 0) | ((xi & 8) ? 2 : 0) | ((b & 8) ? 1 : 0);
   if (v != 0x40) xb_b(x, v);
@@ -118,4 +123,5 @@ static void jx_sqrtsd(XB *x, int d, int s) { jx_sse_rr(x, 0xF2, 0x0F51, d, s); }
 
 static void jx_rel32_jcc(XB *x, int cc) { xb_b(x, 0x0F); xb_b(x, 0x80 + cc); }
 static void jx_rel32_jmp(XB *x) { xb_b(x, 0xE9); }
-#endif
+#endif /* SOLAN_JIT == 1 */
+#endif /* SOLAN_JIT */

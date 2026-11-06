@@ -30,6 +30,8 @@ typedef struct {
 } FC;
 #define TYP(c, i, k) ((c)->ty[(size_t)(i) * FJ_MAXD + (k)])
 #define FNX(c, i, k) ((c)->fnx[(size_t)(i) * FJ_MAXD + (k)])
+/* من هنا فصاعداً: مُرمِّز x86 الخام — مؤجل على ARM64 (SOLAN_JIT == 2) حتى ترحيل بايتاته */
+#if SOLAN_JIT == 1
 #if JX_WIN
 /* على ويندوز: أول 32 بايت من الإطار مخصصة كمساحة ظل (shadow space) لاستدعاءات الدوال C */
 #define CELL(i) RSP, (int)(32 + 8 * (i))
@@ -375,7 +377,14 @@ static bool fj_run(Closure *clo, Value *args, int argc, Value *out) {
   if (g_fj_bailed) { fj->bails++; return false; } /* خفّى الكود الأصلي (عمق/قسمة صفر): أعدها للمفسّر */
   *out = g_fj_ret_bool ? BOOLV(r != 0) : NUMV(r); return true;
 }
-#else
+#elif SOLAN_JIT == 2
+/* ARM64: fnjit مؤجل — بدائل محايدة حتى ترحيل بايتاته x86 الخام */
+static bool fj_compile(Closure *clo) { (void)clo; return 0; }
+static bool fj_run(Closure *clo, Value *args, int argc, Value *out) { (void)clo; (void)args; (void)argc; (void)out; return 0; }
 static void fj_free(Fun *f) { (void)f; }
 static void fj_mark(Fun *f) { (void)f; }
 #endif
+#else
+static void fj_free(Fun *f) { (void)f; }
+static void fj_mark(Fun *f) { (void)f; }
+#endif /* SOLAN_JIT */

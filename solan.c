@@ -1,5 +1,6 @@
 #include "src/config.inc"
 #include "src/jit/x64.inc"
+#include "src/jit/arm64.inc"
 #include "src/core/types.inc"
 #include "src/core/memory.inc"
 #include "src/core/gc.inc"
