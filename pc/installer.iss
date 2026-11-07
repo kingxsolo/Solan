@@ -58,8 +58,9 @@ arabic.VscodeExt=تثبيت إضافة VS Code (تلوين وقصاصات وخا
 Source: "{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-; إضافة VS Code — تُنسخ إلى مجلد الإضافات الخاص بالمستخدم عبر {code:GetVscExtDir}
-Source: "..\editor\vscode\*"; DestDir: "{code:GetVscExtDir}"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
+; إضافة VS Code — ملفات المصدر احتياطاً إلى {app}، والتثبيت الفعلي عبر .vsix في [Code]
+Source: "..\editor\vscode\*"; DestDir: "{app}\editor\vscode"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
+Source: "..\dist\Solan-{#SolanVersion}.vsix"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vscode; Check: VscAvailable
 
 [Icons]
 Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
@@ -72,7 +73,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "�
 Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"; Flags: checkedonce
 Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: unchecked
 Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked
-Name: "vscode"; Description: "{cm:VscodeExt}"; GroupDescription: "التثبيت:"; Flags: checkedonce
+Name: "vscode"; Description: "{cm:VscodeExt}"; GroupDescription: "التثبيت:"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\.solan"; Flags: uninsdeletekey; Tasks: assoc
@@ -84,10 +85,6 @@ Root: HKCU; Subkey: "Software\Classes\Solan.Source\DefaultIcon"; ValueType: stri
 Root: HKCU; Subkey: "Software\Classes\Solan.Source\shell\open\command"; ValueType: string; ValueData: """{app}\solan.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: assoc
 ; تفعيل المسارات الطويلة (يتطلب صلاحيات مدير — يُتجاهل بصمت في التثبيت لكل مستخدم)
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\FileSystem"; ValueType: dword; ValueName: "LongPathsEnabled"; ValueData: 1; Flags: uninsdeletekeyifempty; Tasks: longpaths; Check: IsAdmin
-
-[UninstallDelete]
-; إزالة مجلد إضافة VS Code كاملاً عند إزالة التثبيت
-Type: filesandordirs; Name: "{userappdata}\Code\extensions\solan.solan-lang-{#SolanVersion}"
 
 [Run]
 Filename: "{app}\solan.exe"; Parameters: "-e ""اطبع('سولان مثبَّت بنجاح ✓')"""; Description: "{cm:RunAfter}"; Flags: nowait postinstall skipifsilent
@@ -159,19 +156,6 @@ begin
   RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPaths);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-    if WizardIsTaskSelected('addpath') then
-      EnvAddPath(ExpandConstant('{app}'));
-end;
-
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-begin
-  if CurUninstallStep = usPostUninstall then
-    EnvRemovePath(ExpandConstant('{app}'));
-end;
-
 // ============ تكامل VS Code ============
 // يكتشف تثبيت VS Code ويُحدد مجلد الإضافات المناسب للمستخدم الحالي
 var
@@ -220,6 +204,71 @@ begin
     Result := VscExtDirCached;
     Exit;
   end;
-  Result := ExpandConstant('{userappdata}\Code\extensions\solan.solan-lang-{#SolanVersion}');
+  // مجلد إضافات VS Code الحقيقي: %USERPROFILE%\.vscode\extensions
+  Result := GetEnv('USERPROFILE') + '\.vscode\extensions\solan.solan-lang-{#SolanVersion}';
   VscExtDirCached := Result;
+end;
+
+// إيجاد واجهة أوامر VS Code (code.cmd)
+function FindCodeCli: string;
+begin
+  Result := '';
+  if FileExists(ExpandConstant('{localappdata}\Programs\Microsoft VS Code\bin\code.cmd')) then begin
+    Result := ExpandConstant('{localappdata}\Programs\Microsoft VS Code\bin\code.cmd');
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{pf}\Microsoft VS Code\bin\code.cmd')) then begin
+    Result := ExpandConstant('{pf}\Microsoft VS Code\bin\code.cmd');
+    Exit;
+  end;
+end;
+
+// تثبيت إضافة VS Code: الطريقة الرسمية عبر code --install-extension،
+// وإن تعذر ذلك فنسخ مباشر إلى مجلد إضافات VS Code
+procedure InstallVscExtension;
+var
+  codeCmd, vsix, extDir: string;
+  resultCode: integer;
+begin
+  extDir := GetVscExtDir('');
+  vsix := ExpandConstant('{app}\Solan-{#SolanVersion}.vsix');
+  codeCmd := FindCodeCli;
+  if (Length(codeCmd) > 0) and FileExists(vsix) then begin
+    // علامتا اقتباس خارجيتان: قاعدة cmd /c تزيل الأولى والأخيرة من 4 اقتباسات
+    if Exec(ExpandConstant('{sys}\cmd.exe'),
+            '/c ""' + codeCmd + '" --install-extension "' + vsix + '""',
+            '', SW_HIDE, ewWaitUntilTerminated, resultCode) then
+      if (resultCode = 0) and DirExists(extDir) then
+        Exit;  // نجح التثبيت عبر واجهة VS Code
+  end;
+  // بديل: نسخ مباشر إلى مجلد إضافات VS Code
+  if not DirExists(ExtractFileDir(extDir)) then
+    ForceDirectories(ExtractFileDir(extDir));
+  Exec(ExpandConstant('{sys}\cmd.exe'),
+       '/c xcopy /e /i /y "' + ExpandConstant('{app}\editor\vscode') + '" "' + extDir + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, resultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    if WizardIsTaskSelected('addpath') then
+      EnvAddPath(ExpandConstant('{app}'));
+    if WizardIsTaskSelected('vscode') and VscAvailable then
+      InstallVscExtension;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  extDir: string;
+begin
+  if CurUninstallStep = usPostUninstall then begin
+    EnvRemovePath(ExpandConstant('{app}'));
+    // إزالة إضافة VS Code من مكانها الحقيقي (~\.vscode\extensions)
+    if VscAvailable then begin
+      extDir := GetVscExtDir('');
+      DelTree(extDir, True, True, True);
+    end;
+  end;
 end;
