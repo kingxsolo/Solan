@@ -84,6 +84,34 @@ static Value *jit_h_call(JitCtx *cx, Value *sp, int argc, const uint8_t *call_ip
   return vm.sp;
 }
 
+/* مساعدات الفهرسة العامة: خرائط/سلاسل/كائنات — عبر دوال المفسّر نفسها (get_index/set_index/get_prop).
+   القيم تُقرأ من المكدس الحقيقي فوق القمة: GET [o,ix]، SET [o,ix,v]، PROP [o].
+   عند النجاح يُعدَّل المكدس بدلالة المفسّر ويُعاد مؤشر القمة الجديد؛ عند استثناء
+   يُضبط code=2 (vm.exc مضبوط وvm.sp متسق وip الإطار يشير للتعليمة لأسطر الأخطاء). */
+static Value *jit_h_index_get(JitCtx *cx, Value *sp, const uint8_t *ip) {
+  vm.sp = sp;
+  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)ip;
+  if (vm.gc_pending) collect();
+  Value out;
+  if (get_index(sp[-2], sp[-1], &out)) { cx->code = 2; return sp; }
+  sp[-2] = out; vm.sp = sp - 1; return sp - 1;
+}
+static Value *jit_h_index_set(JitCtx *cx, Value *sp, const uint8_t *ip) {
+  vm.sp = sp;
+  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)ip;
+  if (vm.gc_pending) collect();
+  if (set_index(sp[-3], sp[-2], sp[-1])) { cx->code = 2; return sp; }
+  sp[-3] = sp[-1]; vm.sp = sp - 2; return sp - 2; /* قيمة التعبير تبقى عند القمة الجديدة */
+}
+static Value *jit_h_prop_get(JitCtx *cx, Value *sp, Str *name, const uint8_t *ip) {
+  vm.sp = sp;
+  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)ip;
+  if (vm.gc_pending) collect();
+  Value out;
+  if (get_prop(sp[-1], name, &out)) { cx->code = 2; return sp; }
+  sp[-1] = out; return sp;
+}
+
 static int jc_new_label(JC *c) { if (c->nlab >= JMAXLAB) { c->failed = 1; c->why = "labels"; return 0; } c->lpos[c->nlab] = -1; return c->nlab++; }
 static void jc_bind(JC *c, int l) { c->lpos[l] = c->x.n; }
 static void jc_fixup(JC *c, int l) {
@@ -536,6 +564,65 @@ static void jc_call_helper(JC *c, void *fn) {
   jc_restore_regs(c);
 }
 
+/* مسار الفهرسة العامة (الحامل ليس قائمة): canon + flush ثم مساعد C ينفذ العملية عبر
+   دوال المفسّر، ثم خروج للمفسّر من بعد التعليمة (بقية التكرار تكمل فيه). set: 0 قراءة / 1 كتابة.
+   ملاحظة: jc_canon يعدل c->sd — المتصل يحفظها ويستعيدها (المسار السريع يلتقي التعليمة التالية). */
+static void jc_index_callout(JC *c, int i, int d, int set) {
+  XB *x = &c->x;
+  jc_canon(c, 0, d);
+  jc_flush_vars(c);
+  JI *in = &c->ins[i];
+  const uint8_t *rip = in->ip + in->len;
+  int ex2 = jc_exit_label2(c, in->ip, d, 2); /* استثناء: الاستئناف عند التعليمة يعيد رميه بالمفسّر نظيفاً */
+  int ex0 = jc_exit_label2(c, rip, set ? d - 2 : d - 1, 0);
+#if JX_ARM
+  jx_mov_rr(x, RAX, R15); /* (cx, sp, ip) */
+  jx_lea(x, RCX, R12, -1, 0, d * 16);
+  jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)in->ip);
+#elif JX_WIN
+  jx_mov_rr(x, RCX, R15);
+  jx_lea(x, RDX, R12, -1, 0, d * 16);
+  jx_mov_ri(x, R8, (uint64_t)(uintptr_t)in->ip);
+#else
+  jx_mov_rr(x, RDI, R15);
+  jx_lea(x, RSI, R12, -1, 0, d * 16);
+  jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)in->ip);
+#endif
+  jc_call_helper(c, set ? (void *)jit_h_index_set : (void *)jit_h_index_get);
+  jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
+  jc_jmp(c, ex0);
+}
+
+/* مسار خاصية غير ".طول" (خرائط/كائنات/سلاسل): نفس بنية jc_index_callout مع اسم الخاصية */
+static void jc_prop_callout(JC *c, int i, int d, Str *name) {
+  XB *x = &c->x;
+  jc_canon(c, 0, d);
+  jc_flush_vars(c);
+  JI *in = &c->ins[i];
+  const uint8_t *rip = in->ip + in->len;
+  int ex2 = jc_exit_label2(c, in->ip, d, 2);
+  int ex0 = jc_exit_label2(c, rip, d - 1, 0);
+#if JX_ARM
+  jx_mov_rr(x, RAX, R15); /* (cx, sp, name, ip) */
+  jx_lea(x, RCX, R12, -1, 0, d * 16);
+  jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)name);
+  jx_mov_ri(x, RSI, (uint64_t)(uintptr_t)in->ip);
+#elif JX_WIN
+  jx_mov_rr(x, RCX, R15);
+  jx_lea(x, RDX, R12, -1, 0, d * 16);
+  jx_mov_ri(x, R8, (uint64_t)(uintptr_t)name);
+  jx_mov_ri(x, R9, (uint64_t)(uintptr_t)in->ip);
+#else
+  jx_mov_rr(x, RDI, R15);
+  jx_lea(x, RSI, R12, -1, 0, d * 16);
+  jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)name);
+  jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)in->ip);
+#endif
+  jc_call_helper(c, (void *)jit_h_prop_get);
+  jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
+  jc_jmp(c, ex0);
+}
+
 static void jc_unalias_var(JC *c, int lim, int live, int var) {
   for (int p = 0; p < lim; p++) {
     if (c->sd[p].k == SK_VAR && c->sd[p].var == var) {
@@ -589,13 +676,18 @@ static int jc_fusable_pop(JC *c, int i) {
   return 1;
 }
 
-static void jc_list_ptr(JC *c, int i, int d, int lp) {
+static void jc_list_ptr_lab(JC *c, int i, int d, int lp, int nlist) {
+  /* فحص الحامل كائن-قائمة؛ عند الفشل يقفز nlist (مسار الفهرسة العامة) بدل نقطة التخفي */
   XB *x = &c->x; SD *s = &c->sd[lp];
   if (s->k != SK_MEM && s->k != SK_HOME) { c->failed = 1; c->why = "listop"; return; }
-  int dl = jc_deopt(c, i, d), b, dd; jc_mem_addr(c, lp, &b, &dd);
-  jx_cmp32_mi(x, b, dd, V_OBJ); jc_jcc(c, CC_NE, dl);
+  int b, dd; jc_mem_addr(c, lp, &b, &dd);
+  jx_cmp32_mi(x, b, dd, V_OBJ); jc_jcc(c, CC_NE, nlist);
   jx_mov_rm(x, RAX, b, dd + 8);
-  jx_cmp32_mi(x, RAX, (int)offsetof(Obj, t), O_LIST); jc_jcc(c, CC_NE, dl);
+  jx_cmp32_mi(x, RAX, (int)offsetof(Obj, t), O_LIST); jc_jcc(c, CC_NE, nlist);
+}
+static void jc_list_ptr(JC *c, int i, int d, int lp) {
+  int dl = jc_deopt(c, i, d);
+  jc_list_ptr_lab(c, i, d, lp, dl);
 }
 static void jc_list_index(JC *c, int i, int d, int qp) {
   XB *x = &c->x; int dl = jc_deopt(c, i, d);
@@ -976,27 +1068,60 @@ static void jc_gen_body(JC *c) {
       }
       case OP_GET_PROP: {
         Value nm = c->fn->ch.consts.v[in->a];
-        if (!IS_T(nm, O_STR) || AS_STR(nm) != vm.s_len) { c->failed = 1; c->why = "prop"; break; }
+        if (!IS_T(nm, O_STR)) { c->failed = 1; c->why = "prop"; break; }
+        if (AS_STR(nm) != vm.s_len) { /* خاصية عامة: خرائط/كائنات/سلاسل/أصناف عبر مساعد المفسّر */
+          jc_prop_callout(c, i, d, AS_STR(nm));
+          if (c->failed) break;
+          c->sd[d - 1] = sd_mk(SK_MEM); /* النتيجة في ذاكرة d-1 (canon الداخلي وحّد البقية) */
+          break;
+        }
         int t = jc_alloc_tmp(c, d);
-        jc_list_ptr(c, i, d, d - 1);
+        int lmap = jc_new_label(c), ldone = jc_new_label(c);
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد */
+        jc_list_ptr_lab(c, i, d, d - 1, lmap); /* طول قائمة: مسار سريع، وغير القائمة للمساعد */
         if (c->failed) break;
         jx_cvtsi2sd32_m(x, t, RAX, (int)(offsetof(List, a) + offsetof(VArr, n)));
         c->sd[d - 1] = sd_mk(SK_XMM); c->sd[d - 1].r = (uint8_t)t;
+        jc_jmp(c, ldone);
+        jc_bind(c, lmap);
+        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
+        jc_prop_callout(c, i, d, AS_STR(nm)); /* طول خريطة/نص/كائن */
+        if (c->failed) break;
+        memcpy(c->sd, sv, sizeof(sv)); /* المسار السريع وحده يصل الدمج */
+        c->sd[d - 1] = sd_mk(SK_XMM); c->sd[d - 1].r = (uint8_t)t;
+        jc_bind(c, ldone);
         break;
       }
       case OP_GET_INDEX: {
-        jc_need_num(c, i, d, d - 1);
-        jc_list_ptr(c, i, d, d - 2);
+        /* مسار القائمة السريع؛ غير القائمة (خريطة/نص/كائن) عبر مساعد المفسّر بدل التخفي —
+           فحص المفتاح العددي داخل مسار القائمة فقط (مفاتيح الخرائط قد تكون نصوصاً) */
+        int lmap = jc_new_label(c), ldone = jc_new_label(c);
+        jc_list_ptr_lab(c, i, d, d - 2, lmap);
         if (c->failed) break;
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد */
+        jc_need_num(c, i, d, d - 1);
         jc_list_index(c, i, d, d - 1);
         jc_copyx(c, R12, -1, (d - 2) * 16, RDX, RCX, 0);
         c->sd[d - 2] = sd_mk(SK_MEM);
+        jc_jmp(c, ldone);
+        jc_bind(c, lmap);
+        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
+        jc_index_callout(c, i, d, 0);
+        if (c->failed) break;
+        memcpy(c->sd, sv, sizeof(sv)); /* المسار السريع وحده يصل الدمج — حالته هي المعتمدة */
+        c->sd[d - 2] = sd_mk(SK_MEM);
+        jc_bind(c, ldone);
         break;
       }
       case OP_SET_INDEX: {
-        jc_need_num(c, i, d, d - 2);
-        jc_list_ptr(c, i, d, d - 3);
+        /* نفس بنية GET_INDEX: قائمة سريعة، وغير القائمة (خريطة/كائن) عبر مساعد المفسّر */
+        int lmap = jc_new_label(c), ldone = jc_new_label(c);
+        jc_list_ptr_lab(c, i, d, d - 3, lmap);
         if (c->failed) break;
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد —
+            تعطيل وضع ما بعد المسار السريع هنا كان جذر الخلل: canon كان يشحن سجل m (var4) في موضع
+            الكائن بدل الكائن نفسه لأن الحالة قد عدّلت قبل حفظها */
+        jc_need_num(c, i, d, d - 2);
         jc_list_index(c, i, d, d - 2);
         SD v = c->sd[d - 1];
         jx_alu_rr(x, 0x01, RDX, RCX);
@@ -1008,6 +1133,14 @@ static void jc_gen_body(JC *c) {
         }
         if (v.k == SK_MEM) { jc_copy16(c, R12, (d - 3) * 16, R12, (d - 1) * 16); }
         c->sd[d - 3] = v;
+        jc_jmp(c, ldone);
+        jc_bind(c, lmap);
+        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
+        jc_index_callout(c, i, d, 1);
+        if (c->failed) break;
+        memcpy(c->sd, sv, sizeof(sv));
+        c->sd[d - 3] = v; /* قيمة التعبير بحالة المسار السريع (المساعد كتبها في الذاكرة أيضاً) */
+        jc_bind(c, ldone);
         break;
       }
       case OP_ADD: jc_arith(c, i, d, 0x0F58); break;
