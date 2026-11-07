@@ -143,9 +143,38 @@ NAT(s_loadenv) {
 NAT(s_exit) { fflush(stdout); exit(argc > 0 && IS_NUM(a[0]) ? (int)a[0].as.n : 0); return true; }
 NAT(s_exec) {
   SAFE();
-  STRA(0); fflush(stdout); FILE *p = popen(AS_STR(a[0])->chars, "r"); if (!p) FAIL("تعذّر تنفيذ الأمر");
-  Buf b; buf_init(&b); char tmp[4096]; size_t n; while ((n = fread(tmp, 1, sizeof tmp, p)) > 0) buf_add(&b, tmp, (int)n);
-  pclose(p); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true;
+  STRA(0);
+  /* نفذ(أمر) — السلوك القديم: نص الخرج فقط */
+  if (argc < 2 || IS_NIL(a[1])) {
+    fflush(stdout); FILE *p = popen(AS_STR(a[0])->chars, "r"); if (!p) FAIL("تعذّر تنفيذ الأمر");
+    Buf b; buf_init(&b); char tmp[4096]; size_t n; while ((n = fread(tmp, 1, sizeof tmp, p)) > 0) buf_add(&b, tmp, (int)n);
+    pclose(p); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true;
+  }
+  /* نفذ(أمر, خيارات) — خريطة: دخل, مهلة, مجلد → {رمز, ناتج, خطأ, انتهى_الوقت} */
+  if (!IS_T(a[1], O_MAP)) FAIL("الوسيط الثاني لـ نفذ يجب أن يكون خريطة خيارات");
+  Dict *od = &AS_MAP(a[1])->d;
+  Value vin = NIL, vtmo = NIL, vcwd = NIL;
+  for (int i = 0; i < od->n; i++) {
+    if (od->e[i].k.t == V_EMPTY) continue;
+    Str *k = tostr(od->e[i].k);
+    if (!strcmp(k->chars, "دخل")) vin = od->e[i].v;
+    else if (!strcmp(k->chars, "مهلة")) vtmo = od->e[i].v;
+    else if (!strcmp(k->chars, "مجلد")) vcwd = od->e[i].v;
+  }
+  const char *indata = NULL; size_t inn = 0;
+  if (!IS_NIL(vin)) { Str *s = tostr(vin); indata = s->chars; inn = (size_t)s->len; }
+  int tmo = IS_NUM(vtmo) ? (int)(vtmo.as.n * 1000) : 0; /* المهلة بالثواني — كشبكة.جلب */
+  if (tmo < 0) tmo = 0;
+  const char *cwd = IS_T(vcwd, O_STR) ? AS_STR(vcwd)->chars : NULL;
+  char *outp = NULL, *errp = NULL; size_t outn = 0, errn = 0;
+  int code = os_run_ex(AS_STR(a[0])->chars, cwd, indata, inn, tmo, &outp, &outn, &errp, &errn);
+  if (code == -1) { free(outp); free(errp); FAIL("تعذّر تنفيذ الأمر"); }
+  Map *r = new_map(); push(OBJV(r));
+  dset(&r->d, KX("رمز"), NUMV(code));
+  dset(&r->d, KX("ناتج"), mkstr(outp ? outp : "", (int)outn)); free(outp);
+  dset(&r->d, KX("خطأ"), mkstr(errp ? errp : "", (int)errn)); free(errp);
+  dset(&r->d, KX("انتهى_الوقت"), BOOLV(code == -2));
+  vm.sp--; *res = OBJV(r); return true;
 }
 NAT(s_run) { SAFE(); STRA(0); fflush(stdout); int r = system(AS_STR(a[0])->chars); *res = NUMV(WIFEXITED(r) ? WEXITSTATUS(r) : r); return true; }
 NAT(s_cwd) { char b[PATH_MAX]; if (!getcwd(b, sizeof b)) FAIL("تعذّر قراءة المسار"); *res = mkstr(b, (int)strlen(b)); return true; }

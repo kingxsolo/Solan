@@ -51,11 +51,14 @@ arabic.AssocFiles=ربط ملفات سولان (.سو .an .solan) بالبرنا
 arabic.RunAfter=تشغيل سولان الآن (اختبار التثبيت)
 arabic.OpenReadme=فتح دليل النسخة الشخصية للويندوز
 arabic.LongPaths=تفعيل دعم المسارات الطويلة في ويندوز (يتطلب صلاحيات مدير)
+arabic.VscodeExt=تثبيت إضافة VS Code (تلوين وقصاصات وخادم اللغة)
 
 [Files]
 Source: "{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README-PC.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+; إضافة VS Code — تُنسخ إلى مجلد الإضافات الخاص بالمستخدم عبر {code:GetVscExtDir}
+Source: "..\editor\vscode\*"; DestDir: "{code:GetVscExtDir}"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
 
 [Icons]
 Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
@@ -68,6 +71,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "�
 Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"; Flags: checkedonce
 Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: unchecked
 Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked
+Name: "vscode"; Description: "{cm:VscodeExt}"; GroupDescription: "التثبيت:"; Flags: checkedonce
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\.solan"; Flags: uninsdeletekey; Tasks: assoc
@@ -79,6 +83,10 @@ Root: HKCU; Subkey: "Software\Classes\Solan.Source\DefaultIcon"; ValueType: stri
 Root: HKCU; Subkey: "Software\Classes\Solan.Source\shell\open\command"; ValueType: string; ValueData: """{app}\solan.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: assoc
 ; تفعيل المسارات الطويلة (يتطلب صلاحيات مدير — يُتجاهل بصمت في التثبيت لكل مستخدم)
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\FileSystem"; ValueType: dword; ValueName: "LongPathsEnabled"; ValueData: 1; Flags: uninsdeletekeyifempty; Tasks: longpaths; Check: IsAdmin
+
+[UninstallDelete]
+; إزالة مجلد إضافة VS Code كاملاً عند إزالة التثبيت
+Type: filesandordirs; Name: "{userappdata}\Code\extensions\solan.solan-lang-{#SolanVersion}"
 
 [Run]
 Filename: "{app}\solan.exe"; Parameters: "-e ""اطبع('سولان مثبَّت بنجاح ✓')"""; Description: "{cm:RunAfter}"; Flags: nowait postinstall skipifsilent
@@ -161,4 +169,56 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
     EnvRemovePath(ExpandConstant('{app}'));
+end;
+
+// ============ تكامل VS Code ============
+// يكتشف تثبيت VS Code ويُحدد مجلد الإضافات المناسب للمستخدم الحالي
+var
+  VscExtDirCached: string;
+  VscChecked: Boolean;
+  VscFound: Boolean;
+
+function VscAvailable: Boolean;
+var
+  EnvPath: String;
+begin
+  if VscChecked then begin
+    Result := VscFound;
+    Exit;
+  end;
+  VscChecked := True;
+  Result := False;
+  // 1) تثبيت المستخدم/النظام القياسي
+  if DirExists(ExpandConstant('{localappdata}\Programs\Microsoft VS Code'))
+    or DirExists(ExpandConstant('{pf}\Microsoft VS Code')) then
+  begin
+    Result := True;
+    VscFound := True;
+    Exit;
+  end;
+  // 2) هل يوجد "bin\code.cmd" عبر PATH (المستخدم أو النظام)؟
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath)
+    and (Pos('\Microsoft VS Code\bin', AnsiUppercase(EnvPath)) > 0) then
+  begin
+    VscFound := True;
+    Result := True;
+    Exit;
+  end;
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', EnvPath)
+    and (Pos('\Microsoft VS Code\bin', AnsiUppercase(EnvPath)) > 0) then
+  begin
+    VscFound := True;
+    Result := True;
+    Exit;
+  end;
+end;
+
+function GetVscExtDir(S: string): string;
+begin
+  if Length(VscExtDirCached) > 0 then begin
+    Result := VscExtDirCached;
+    Exit;
+  end;
+  Result := ExpandConstant('{userappdata}\Code\extensions\solan.solan-lang-{#SolanVersion}');
+  VscExtDirCached := Result;
 end;

@@ -130,26 +130,52 @@ static bool read_body_stream(int fd, Map *hm, bool nobody, Value callback, bool 
   return read_stream_payload(fd, -1, callback, collect, body, &total, callback_failed);
 }
 
-static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value callback, bool collect_stream_body, Value *res) {
+static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value callback, bool collect_stream_body, bool honly, const char *proxy, Value *res) {
   bool streaming = !IS_NIL(callback);
   char method[16]; snprintf(method, sizeof method, "%s", method0); char url[4096]; snprintf(url, sizeof url, "%s", url0); Str *body = body0;
   for (int hop = 0;; hop++) {
     Url u; if (!parse_url(url, &u) || (strcmp(u.scheme, "http") && strcmp(u.scheme, "https"))) { rt_error("رابط غير صالح: %s", url); return 1; }
     if (u.tls && !tls_load()) return 2;
-    char err[300]; int fd = tcp_connect(u.host, u.port, tmo, err, sizeof err); if (fd < 0) { rt_error("%s", err); return 1; }
+    char err[300]; int fd;
+    if (proxy && *proxy) {
+      if (!host_allowed(u.host)) { rt_error("الصلاحية غير ممنوحة: شبكة (المضيف %s)", u.host); return 1; }
+      char scheme[16], ph[256], puser[128], ppass[128]; int pport;
+      if (!proxy_split(proxy, scheme, 16, ph, 256, &pport, puser, 128, ppass, 128, err, sizeof err)) { rt_error("%s", err); return 1; }
+      fd = tcp_connect(ph, pport, tmo, err, sizeof err);
+      if (fd < 0) { rt_error("%s", err); return 1; }
+      if (!proxy_tunnel(fd, proxy, u.host, u.port, tmo, err, sizeof err)) { conn_close(fd); rt_error("%s", err); return 1; }
+    } else {
+      fd = tcp_connect(u.host, u.port, tmo, err, sizeof err);
+      if (fd < 0) { rt_error("%s", err); return 1; }
+    }
     if (u.tls && !tls_wrap_client(fd, u.host, verify, err, sizeof err)) { conn_close(fd); rt_error("%s", err); return 1; }
     tmo_ms[fd] = tmo;
-    Buf rq; buf_init(&rq); buf_fmt(&rq, "%s %s HTTP/1.1\r\nHost: %s", method, u.path, u.host);
-    if ((u.tls && u.port != 443) || (!u.tls && u.port != 80)) buf_fmt(&rq, ":%d", u.port);
-    buf_fmt(&rq, "\r\nConnection: close\r\n");
-    if (streaming) { if (!dict_has_ci(hdrs, "accept-encoding")) buf_fmt(&rq, "Accept-Encoding: identity\r\n"); }
-    else buf_fmt(&rq, "Accept-Encoding: %s\r\n", z_load() ? "gzip" : "identity");
-    if (!dict_has_ci(hdrs, "user-agent")) buf_fmt(&rq, "User-Agent: solan/%s\r\n", SOLAN_VERSION);
-    if (!dict_has_ci(hdrs, "accept")) buf_fmt(&rq, "Accept: */*\r\n");
-    add_user_headers(&rq, hdrs);
-    if (body || !strcmp(method, "POST") || !strcmp(method, "PUT") || !strcmp(method, "PATCH")) {
-      buf_fmt(&rq, "Content-Length: %d\r\n", body ? body->len : 0);
-      if (bodyjson && !dict_has_ci(hdrs, "content-type")) buf_fmt(&rq, "Content-Type: application/json\r\n");
+    Buf rq; buf_init(&rq); buf_fmt(&rq, "%s %s HTTP/1.1\r\n", method, u.path);
+    if (honly) {
+      /* وضع رؤوس_فقط: لا ترويسات تلقائية إطلاقاً — المحدد يدوياً فقط وبترتيبه.
+         الاستثناء التقني: Host وContent-Length وConnection: close تُضاف فقط إن غابت
+         لأن غيابها يكسر بروتوكول HTTP/1.1 أو قراءة الجسم، لا بصمة الطلب. */
+      if (!dict_has_ci(hdrs, "host")) {
+        buf_fmt(&rq, "Host: %s", u.host);
+        if ((u.tls && u.port != 443) || (!u.tls && u.port != 80)) buf_fmt(&rq, ":%d", u.port);
+        buf_fmt(&rq, "\r\n");
+      }
+      add_user_headers(&rq, hdrs);
+      if (body && !dict_has_ci(hdrs, "content-length")) buf_fmt(&rq, "Content-Length: %d\r\n", body->len);
+      if (!dict_has_ci(hdrs, "connection")) buf_fmt(&rq, "Connection: close\r\n");
+    } else {
+      buf_fmt(&rq, "Host: %s", u.host);
+      if ((u.tls && u.port != 443) || (!u.tls && u.port != 80)) buf_fmt(&rq, ":%d", u.port);
+      buf_fmt(&rq, "\r\nConnection: close\r\n");
+      if (streaming) { if (!dict_has_ci(hdrs, "accept-encoding")) buf_fmt(&rq, "Accept-Encoding: identity\r\n"); }
+      else buf_fmt(&rq, "Accept-Encoding: %s\r\n", z_load() ? "gzip" : "identity");
+      if (!dict_has_ci(hdrs, "user-agent")) buf_fmt(&rq, "User-Agent: solan/%s\r\n", SOLAN_VERSION);
+      if (!dict_has_ci(hdrs, "accept")) buf_fmt(&rq, "Accept: */*\r\n");
+      add_user_headers(&rq, hdrs);
+      if (body || !strcmp(method, "POST") || !strcmp(method, "PUT") || !strcmp(method, "PATCH")) {
+        buf_fmt(&rq, "Content-Length: %d\r\n", body ? body->len : 0);
+        if (bodyjson && !dict_has_ci(hdrs, "content-type")) buf_fmt(&rq, "Content-Type: application/json\r\n");
+      }
     }
     buf_fmt(&rq, "\r\n"); if (body) buf_add(&rq, body->chars, body->len);
     int wr = conn_write(fd, rq.p, rq.n); free(rq.p);
@@ -236,7 +262,10 @@ NAT(net_fetch) {
     dset(&hm2->d, mkstr("Content-Type", 12), mkstr(ct, (int)strlen(ct))); body = intern(buf_cstr(&mp), mp.n); free(mp.p); h = OBJV(hm2);
   } else if (!IS_NIL(b)) { if (IS_T(b, O_MAP) || IS_T(b, O_LIST)) { Buf jb; buf_init(&jb); json_enc(b, &jb, 0, 0); body = intern(buf_cstr(&jb), jb.n); free(jb.p); js = true; } else body = tostr(b); }
   push(body ? OBJV(body) : NIL);
-  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, NIL, false, res);
+  Value hfo = optv(argc, a, 1, "رؤوس_فقط"), px = optv(argc, a, 1, "بروكسي");
+  bool honly = !IS_NIL(hfo) && !falsey(hfo);
+  const char *proxy = IS_T(px, O_STR) ? AS_STR(px)->chars : NULL;
+  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, NIL, false, honly, proxy, res);
   vm.sp--; if (hm2) vm.sp--;
   if (r == 2) return net_fetch_curl(argc, a, res);
   return r == 0;
@@ -269,9 +298,12 @@ NAT(net_fetch_stream) {
     dset(&hm2->d, mkstr("Content-Type", 12), mkstr(ct, (int)strlen(ct))); body = intern(buf_cstr(&mp), mp.n); free(mp.p); h = OBJV(hm2);
   } else if (!IS_NIL(b)) { if (IS_T(b, O_MAP) || IS_T(b, O_LIST)) { Buf jb; buf_init(&jb); json_enc(b, &jb, 0, 0); body = intern(buf_cstr(&jb), jb.n); free(jb.p); js = true; } else body = tostr(b); }
   push(body ? OBJV(body) : NIL);
+  Value hfo = optv(argc, a, 2, "رؤوس_فقط"), px = optv(argc, a, 2, "بروكسي");
+  bool honly = !IS_NIL(hfo) && !falsey(hfo);
+  const char *proxy = IS_T(px, O_STR) ? AS_STR(px)->chars : NULL;
   int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js,
     IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5,
-    callback, collect, res);
+    callback, collect, honly, proxy, res);
   vm.sp--; if (hm2) vm.sp--;
   if (r == 2) FAIL("جلب_متدفق عبر HTTPS يحتاج OpenSSL 3 وقت التشغيل؛ لا يستخدم fallback مجمّعاً كي لا يفقد التدفق الحي");
   return r == 0;

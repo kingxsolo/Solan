@@ -149,6 +149,107 @@ static int tcp_connect(const char *host, int port, int tmo, char *err, int es) {
   if (fd >= MAXFD) { close(fd); snprintf(err, es, "عدد الاتصالات كبير جدا"); return -1; }
   int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); fd_setup(fd); return fd;
 }
+/* ============ بروكسي: socks5://[user:pass@]host:port أو http://host:port ============ */
+static bool proxy_split(const char *proxy, char *scheme, int scn, char *ph, int phn, int *pport, char *user, int un, char *pass, int pn, char *err, int es) {
+  const char *p = strstr(proxy, "://");
+  if (p) { size_t sl = (size_t)(p - proxy); if (sl >= (size_t)scn) { snprintf(err, es, "بروتوكول بروكسي غير معروف"); return false; } memcpy(scheme, proxy, sl); scheme[sl] = 0; p += 3; }
+  else { snprintf(scheme, scn, "socks5"); p = proxy; }
+  const char *at = strrchr(p, '@');
+  if (at) {
+    const char *colon = memchr(p, ':', (size_t)(at - p));
+    size_t ul = colon ? (size_t)(colon - p) : (size_t)(at - p);
+    if (ul >= (size_t)un) { snprintf(err, es, "اسم مستخدم البروكسي طويل جدا"); return false; }
+    memcpy(user, p, ul); user[ul] = 0;
+    if (colon) { size_t pl = (size_t)(at - colon - 1); if (pl >= (size_t)pn) pl = (size_t)pn - 1; memcpy(pass, colon + 1, pl); pass[pl] = 0; }
+    p = at + 1;
+  } else { user[0] = 0; pass[0] = 0; }
+  const char *colon = strrchr(p, ':');
+  if (colon) {
+    size_t hl = (size_t)(colon - p);
+    if (hl >= (size_t)phn) { snprintf(err, es, "عنوان البروكسي طويل جدا"); return false; }
+    memcpy(ph, p, hl); ph[hl] = 0;
+    *pport = atoi(colon + 1);
+  } else {
+    snprintf(ph, phn, "%s", p);
+    *pport = !strcmp(scheme, "http") ? 80 : 1080;
+  }
+  if (!ph[0] || *pport <= 0 || *pport > 65535) { snprintf(err, es, "عنوان بروكسي غير صالح: %s", proxy); return false; }
+  return true;
+}
+/* يبني نفقًا عبر البروكسي إلى host:port — يُستدعى بعد الاتصال بالبروكسي نفسه وقبل TLS */
+static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, int tmo, char *err, int es) {
+  if (!proxy || !*proxy) return true;
+  char scheme[16], ph[256], user[128], pass[128]; int pport;
+  if (!proxy_split(proxy, scheme, 16, ph, 256, &pport, user, 128, pass, 128, err, es)) return false;
+  if (strcmp(scheme, "socks5") && strcmp(scheme, "socks5h") && strcmp(scheme, "http")) {
+    snprintf(err, es, "بروتوكول بروكسي غير مدعوم: %s (مدعوم: socks5 وhttp)", scheme); return false;
+  }
+  if (!strcmp(scheme, "http")) {
+    /* HTTP CONNECT */
+    Buf rq; buf_init(&rq);
+    buf_fmt(&rq, "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", host, port, host, port);
+    if (user[0]) {
+      char up[300]; snprintf(up, sizeof up, "%s:%s", user, pass);
+      Buf b; buf_init(&b); b64_enc((const uint8_t *)up, strlen(up), &b);
+      buf_fmt(&rq, "Proxy-Authorization: Basic %s\r\n", buf_cstr(&b)); free(b.p);
+    }
+    buf_fmt(&rq, "\r\n");
+    if (conn_write(fd, rq.p, rq.n) < 0) { free(rq.p); snprintf(err, es, "فشل إرسال CONNECT للبروكسي"); return false; }
+    free(rq.p);
+    Buf line; buf_init(&line);
+    int r = rb_getline(fd, &line); /* سطر الحالة */
+    if (r <= 0) { free(line.p); snprintf(err, es, "لا رد من البروكسي"); return false; }
+    char *sp = strchr(line.p, ' '); int sc = sp ? atoi(sp + 1) : 0;
+    bool ok = sc >= 200 && sc < 300;
+    free(line.p);
+    if (!ok) { /* استهلك بقية الرؤوس للوضوح ثم أفشل */
+      for (int i = 0; i < 40; i++) { Buf t; buf_init(&t); int q = rb_getline(fd, &t); free(t.p); if (q <= 0 || t.n == 0) break; }
+      snprintf(err, es, "رفض البروكسي الاتصال (CONNECT)"); return false;
+    }
+    for (int i = 0; i < 40; i++) { Buf t; buf_init(&t); int q = rb_getline(fd, &t); free(t.p); if (q <= 0 || t.n == 0) break; }
+    return true;
+  }
+  /* SOCKS5 (RFC 1928) — يرسل اسم المضيف كنص فالخادم يحلّه (سلوك socks5h) */
+  bool authed = user[0] != 0;
+  uint8_t greet[4] = {5, 2, 0, 2}; /* بلا توثيق + توثيق user/pass */
+  if (!authed) greet[1] = 1;
+  if (conn_write(fd, (const char *)greet, authed ? 4 : 3) < 0) { snprintf(err, es, "فشل إرسال التحية للبروكسي"); return false; }
+  uint8_t gr[2];
+  { Buf t; buf_init(&t); int q = rb_exact(fd, 2, &t); if (q != 1) { free(t.p); snprintf(err, es, "رد بروكسي غير مكتمل"); return false; } memcpy(gr, t.p, 2); free(t.p); }
+  if (gr[0] != 5) { snprintf(err, es, "ليس بروكسي SOCKS5"); return false; }
+  if (gr[1] == 2) {
+    if (!authed) { snprintf(err, es, "البروكسي يطلب اسم مستخدم وكلمة مرور"); return false; }
+    uint8_t ul = (uint8_t)strlen(user), pl = (uint8_t)strlen(pass);
+    Buf a; buf_init(&a); buf_addc(&a, (char)1); buf_addc(&a, (char)ul); buf_add(&a, user, ul); buf_addc(&a, (char)pl); buf_add(&a, pass, pl);
+    int w = conn_write(fd, a.p, a.n); free(a.p);
+    if (w < 0) { snprintf(err, es, "فشل إرسال بيانات التوثيق"); return false; }
+    Buf t; buf_init(&t); int q = rb_exact(fd, 2, &t); memcpy(gr, t.p, q == 1 ? 2 : 0); free(t.p);
+    if (q != 1 || gr[1] != 0) { snprintf(err, es, "فشل توثيق البروكسي (اسم المستخدم أو كلمة المرور)"); return false; }
+  } else if (gr[1] != 0) { snprintf(err, es, "طريقة توثيق البروكسي غير مدعومة (%d)", gr[1]); return false; }
+  size_t hl = strlen(host);
+  if (hl > 255) { snprintf(err, es, "اسم المضيف طويل جدا للبروكسي"); return false; }
+  Buf req; buf_init(&req);
+  buf_addc(&req, (char)5); buf_addc(&req, (char)1); buf_addc(&req, (char)0); buf_addc(&req, (char)3); buf_addc(&req, (char)hl);
+  buf_add(&req, host, hl);
+  buf_addc(&req, (char)((port >> 8) & 255)); buf_addc(&req, (char)(port & 255));
+  if (conn_write(fd, req.p, req.n) < 0) { free(req.p); snprintf(err, es, "فشل إرسال طلب الاتصال للبروكسي"); return false; }
+  free(req.p);
+  Buf rep; buf_init(&rep);
+  int q = rb_exact(fd, 4, &rep); /* VER REP RSV ATYP */
+  if (q != 1) { free(rep.p); snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
+  uint8_t code = (uint8_t)rep.p[1], atyp = (uint8_t)rep.p[3]; free(rep.p);
+  int rest = atyp == 1 ? 4 : atyp == 4 ? 16 : 0; /* IPv4 | IPv6 | نطاق */
+  if (atyp == 3) {
+    Buf t2; buf_init(&t2); int q1 = rb_exact(fd, 1, &t2);
+    if (q1 != 1) { free(t2.p); snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
+    rest = (uint8_t)t2.p[0]; free(t2.p);
+  }
+  rest += 2; /* المنفذ */
+  Buf t3; buf_init(&t3); int q2 = rb_exact(fd, rest, &t3); free(t3.p);
+  if (q2 != 1) { snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
+  if (code != 0) { snprintf(err, es, "رفض البروكسي الاتصال بالهدف (رمز %d)", code); return false; }
+  return true;
+}
 static bool tls_wrap_client(int fd, const char *host, bool verify, char *err, int es) {
   if (!tls_load()) { snprintf(err, es, "التشفير غير متاح: لم أجد libssl — %s", TLS_HINT); return false; }
   void *ctx = get_ctx(verify); void *ssl = ctx ? tl.SSL_new(ctx) : NULL;

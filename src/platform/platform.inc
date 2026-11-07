@@ -570,6 +570,142 @@ static const char *solan_strptime(const char *s, const char *f, struct tm *tm) {
 }
 #endif
 
+/* ============ تشغيل أمر متقدم (دخل + مهلة + خطأ منفصل) ============ */
+static long ex_now_ms(void) {
+#if SOLAN_WIN
+  return (long)GetTickCount();
+#else
+  struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+#endif
+}
+/* يشغّل الأمر عبر sh -c (يونكس) أو cmd /c (ويندوز).
+   يعيد رمز الخروج، أو -1 عند فشل التشغيل، أو -2 عند انتهاء المهلة (بعد قتل العملية).
+   out/err إن لم تكن NULL تُستقبل النص الملتقط (مخصص بـ malloc). */
+static int os_run_ex(const char *cmd, const char *cwd, const char *in, size_t inn, int tmo_ms,
+                     char **out, size_t *outn, char **err, size_t *errn) {
+#if SOLAN_WIN
+  size_t cln = strlen(cmd) + 16; char *cl = (char *)malloc(cln); if (!cl) return -1;
+  snprintf(cl, cln, "cmd.exe /c %s", cmd);
+  wchar_t *wcl = w_utf16(cl), *wcwd = cwd ? w_utf16(cwd) : NULL; free(cl);
+  SECURITY_ATTRIBUTES sa; sa.nLength = sizeof sa; sa.lpSecurityDescriptor = NULL; sa.bInheritHandle = TRUE;
+  HANDLE in_r = NULL, in_w = NULL, out_r = NULL, out_w = NULL, err_r = NULL, err_w = NULL;
+  if (!CreatePipe(&in_r, &in_w, &sa, 0) || !CreatePipe(&out_r, &out_w, &sa, 0) || !CreatePipe(&err_r, &err_w, &sa, 0)) {
+    if (in_r) CloseHandle(in_r); if (in_w) CloseHandle(in_w); if (out_r) CloseHandle(out_r);
+    if (out_w) CloseHandle(out_w); if (err_r) CloseHandle(err_r); if (err_w) CloseHandle(err_w);
+    free(wcl); free(wcwd); return -1;
+  }
+  SetHandleInformation(in_w, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0);
+  STARTUPINFOW si; memset(&si, 0, sizeof si); si.cb = sizeof si;
+  si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = in_r; si.hStdOutput = out_w; si.hStdError = err_w;
+  PROCESS_INFORMATION pi; memset(&pi, 0, sizeof pi);
+  fflush(stdout); fflush(stderr);
+  BOOL ok = CreateProcessW(NULL, wcl, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, wcwd, &si, &pi);
+  free(wcl); free(wcwd);
+  CloseHandle(in_r); CloseHandle(out_w); CloseHandle(err_w);
+  if (!ok) { CloseHandle(in_w); CloseHandle(out_r); CloseHandle(err_r);
+    if (out) { *out = (char *)calloc(1, 1); if (outn) *outn = 0; }
+    if (err) { *err = (char *)calloc(1, 1); if (errn) *errn = 0; }
+    return -1; }
+  /* كتابة الدخل ثم إغلاق الطرف ليصل EOF للابن */
+  if (in && inn) { DWORD wrote = 0; WriteFile(in_w, in, (DWORD)inn, &wrote, NULL); }
+  CloseHandle(in_w);
+  size_t co = 0, capo = 4096, ce = 0, cape = 4096;
+  char *bo = (char *)malloc(capo), *be = (char *)malloc(cape);
+  long t0 = ex_now_ms(); bool timed_out = false, o_open = true, e_open = true;
+  while (o_open || e_open) {
+    if (tmo_ms > 0 && ex_now_ms() - t0 >= tmo_ms) { timed_out = true; TerminateProcess(pi.hProcess, (UINT)-1); break; }
+    char tmp[8192]; DWORD got = 0, avail = 0;
+    if (o_open) {
+      if (PeekNamedPipe(out_r, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+        if (ReadFile(out_r, tmp, sizeof tmp, &got, NULL) && got > 0) {
+          while (co + got + 1 > capo) capo *= 2; bo = (char *)realloc(bo, capo);
+          memcpy(bo + co, tmp, got); co += got;
+        } else o_open = false;
+      } else if (!PeekNamedPipe(out_r, NULL, 0, NULL, &avail, NULL)) o_open = false;
+      else Sleep(2);
+    }
+    if (e_open) {
+      if (PeekNamedPipe(err_r, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+        if (ReadFile(err_r, tmp, sizeof tmp, &got, NULL) && got > 0) {
+          while (ce + got + 1 > cape) cape *= 2; be = (char *)realloc(be, cape);
+          memcpy(be + ce, tmp, got); ce += got;
+        } else e_open = false;
+      } else if (!PeekNamedPipe(err_r, NULL, 0, NULL, &avail, NULL)) e_open = false;
+      else Sleep(2);
+    }
+  }
+  CloseHandle(out_r); CloseHandle(err_r);
+  DWORD wait = tmo_ms > 0 ? (DWORD)(timed_out ? 2000 : (tmo_ms - (ex_now_ms() - t0))) : INFINITE;
+  if (WaitForSingleObject(pi.hProcess, wait) == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, (UINT)-1); timed_out = true; WaitForSingleObject(pi.hProcess, 2000); }
+  DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+  if (out) { bo[co] = 0; *out = bo; if (outn) *outn = co; } else free(bo);
+  if (err) { be[ce] = 0; *err = be; if (errn) *errn = ce; } else free(be);
+  return timed_out ? -2 : (int)code;
+#else
+  int ip[2] = {-1, -1}, op[2] = {-1, -1}, ep[2] = {-1, -1};
+  if (pipe(ip) < 0 || pipe(op) < 0 || pipe(ep) < 0) {
+    if (ip[0] >= 0) { close(ip[0]); close(ip[1]); }
+    if (op[0] >= 0) { close(op[0]); close(op[1]); }
+    if (ep[0] >= 0) { close(ep[0]); close(ep[1]); }
+    return -1;
+  }
+  fflush(stdout); fflush(stderr);
+  pid_t pid = fork();
+  if (pid < 0) { close(ip[0]); close(ip[1]); close(op[0]); close(op[1]); close(ep[0]); close(ep[1]); return -1; }
+  if (pid == 0) {
+    dup2(ip[0], 0); dup2(op[1], 1); dup2(ep[1], 2);
+    int fds[6] = {ip[0], ip[1], op[0], op[1], ep[0], ep[1]};
+    for (int i = 0; i < 6; i++) close(fds[i]);
+    if (cwd && chdir(cwd) != 0) _exit(126);
+    setenv("GIT_TERMINAL_PROMPT", "0", 1); setenv("GIT_ALLOW_PROTOCOL", "https:http:ssh:git:file", 1);
+    execlp("sh", "sh", "-c", cmd, (char *)NULL);
+    _exit(127);
+  }
+  close(ip[0]); close(op[1]); close(ep[1]);
+  if (in && inn) { ssize_t w; size_t off = 0; while (off < inn) { w = write(ip[1], in + off, inn - off); if (w <= 0) break; off += (size_t)w; } }
+  close(ip[1]);
+  size_t co = 0, capo = 4096, ce = 0, cape = 4096;
+  char *bo = (char *)malloc(capo), *be = (char *)malloc(cape);
+  long t0 = ex_now_ms(); bool timed_out = false, o_open = true, e_open = true;
+  while (o_open || e_open) {
+    struct pollfd pf[2]; int oi = -1, ei = -1, np = 0;
+    if (o_open) { pf[np].fd = op[0]; pf[np].events = POLLIN; oi = np; np++; }
+    if (e_open) { pf[np].fd = ep[0]; pf[np].events = POLLIN; ei = np; np++; }
+    int pt = -1;
+    if (tmo_ms > 0) {
+      long left = tmo_ms - (ex_now_ms() - t0);
+      if (left <= 0) { timed_out = true; kill(pid, SIGKILL); break; }
+      pt = (int)left;
+    }
+    int r = poll(pf, (nfds_t)np, pt);
+    if (r < 0 && errno == EINTR) continue;
+    if (r <= 0) { if (tmo_ms > 0 && ex_now_ms() - t0 >= tmo_ms) { timed_out = true; kill(pid, SIGKILL); break; } continue; }
+    char tmp[8192];
+    if (oi >= 0 && (pf[oi].revents & (POLLIN | POLLHUP | POLLERR))) {
+      ssize_t g = read(op[0], tmp, sizeof tmp);
+      if (g > 0) { while (co + (size_t)g + 1 > capo) capo *= 2; bo = (char *)realloc(bo, capo); memcpy(bo + co, tmp, (size_t)g); co += (size_t)g; }
+      else { close(op[0]); o_open = false; }
+    }
+    if (ei >= 0 && (pf[ei].revents & (POLLIN | POLLHUP | POLLERR))) {
+      ssize_t g = read(ep[0], tmp, sizeof tmp);
+      if (g > 0) { while (ce + (size_t)g + 1 > cape) cape *= 2; be = (char *)realloc(be, cape); memcpy(be + ce, tmp, (size_t)g); ce += (size_t)g; }
+      else { close(ep[0]); e_open = false; }
+    }
+  }
+  if (o_open) close(op[0]);
+  if (e_open) close(ep[0]);
+  int st = 0; while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+  if (out) { bo[co] = 0; *out = bo; if (outn) *outn = co; } else free(bo);
+  if (err) { be[ce] = 0; *err = be; if (errn) *errn = ce; } else free(be);
+  if (timed_out) return -2;
+  return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+#endif
+}
+
 #if SOLAN_WIN
 #define OS_DLLEXT ".dll"
 #elif SOLAN_MAC

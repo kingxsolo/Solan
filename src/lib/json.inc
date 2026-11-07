@@ -152,6 +152,7 @@ static bool net_fetch_curl(int argc, Value *a, Value *res) {
       }
     }
     if (mget(o, KN("جسم"), &v) && !IS_NIL(v)) { body = v; json_body = IS_T(v, O_MAP) || IS_T(v, O_LIST); }
+    if (mget(o, KN("بروكسي"), &v) && IS_T(v, O_STR)) { buf_add(&cmd, " -x ", 4); shq(&cmd, AS_STR(v)->chars, AS_STR(v)->len); }
   }
   if (method) { buf_add(&cmd, " -X ", 4); shq(&cmd, method->chars, method->len); }
   if (!IS_NIL(body)) {

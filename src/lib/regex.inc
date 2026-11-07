@@ -661,6 +661,11 @@ static void init_natives(void) {
   defnat(g, "هل_دالة", n_is_fn, 1, 1); defnat(g, "نسق", n_format, 1, -1); defnat(g, "لون_الكود", n_hl_ansi, 1, 1); defnat(g, "كود_html", n_hl_html, 1, 1); defnat(g, "ارقام_عربية", n_digits_ar, 1, 1); defnat(g, "ارقام_لاتينية", n_digits_en, 1, 1); defnat(g, "ارقام_فارسية", n_digits_fa, 1, 1); defnat(g, "ارقام_الاخراج", n_digits_mode, 1, 1); defnat(g, "كوروتين", co_new, 1, -1); defnat(g, "استأنف", co_resume_n, 1, 2); defnat(g, "منتهي", co_done, 1, 1); defnat(g, "_استأنف", co_step, 1, 3); defnat(g, "_تعداد", n_enum, 1, 1); defnat(g, "لديه", n_has, 2, 2);
   dset(g, KN("النسخة"), mkstr(SOLAN_VERSION, (int)strlen(SOLAN_VERSION)));
 
+  /* دوال رياضية عالمية — موثقة بلا بادئة الوحدة (قرب/ارضي/سقف/بتر...) */
+  defnat(g, "قرب", m_round, 1, 1); defnat(g, "ارضي", m_floor, 1, 1); defnat(g, "سقف", m_ceil, 1, 1); defnat(g, "بتر", m_trunc, 1, 1);
+  defnat(g, "جذر", m_sqrt, 1, 1); defnat(g, "مطلق", m_abs, 1, 1); defnat(g, "قوة", m_pow, 2, 2); defnat(g, "لوغ", m_log, 1, 2);
+  defnat(g, "اكبر", m_max, 0, -1); defnat(g, "اصغر", m_min, 0, -1);
+
   Map *m = mkmod("رياضيات");
   MF(m, "جذر", m_sqrt, 1, 1); MF(m, "جيب", m_sin, 1, 1); MF(m, "جتا", m_cos, 1, 1); MF(m, "ظل", m_tan, 1, 1);
   MF(m, "ارضي", m_floor, 1, 1); MF(m, "سقف", m_ceil, 1, 1); MF(m, "مطلق", m_abs, 1, 1); MF(m, "قرب", m_round, 1, 1);
@@ -677,7 +682,7 @@ static void init_natives(void) {
   m = mkmod("زمن");
   MF(m, "الان", t_now, 0, 0); MF(m, "تاريخ", t_date, 0, 2); MF(m, "من_تاريخ", t_mk, 1, 2); MF(m, "تحليل", t_parse, 2, 3); MF(m, "ساعة", t_clock, 0, 0); MF(m, "نوم", t_sleep, 1, 1); MF(m, "تنسيق", t_format, 1, 2);
   m = mkmod("نظام");
-  MF(m, "بيئة", s_env, 1, 2); MF(m, "ضبط_بيئة", s_setenv, 2, 2); MF(m, "طرفية", s_tty, 0, 0); MF(m, "حمل_env", s_loadenv, 0, 1); MF(m, "اخرج", s_exit, 0, 1); MF(m, "نفذ", s_exec, 1, 1); MF(m, "شغل", s_run, 1, 1); MF(m, "مسار", s_cwd, 0, 0);
+  MF(m, "بيئة", s_env, 1, 2); MF(m, "ضبط_بيئة", s_setenv, 2, 2); MF(m, "طرفية", s_tty, 0, 0); MF(m, "حمل_env", s_loadenv, 0, 1); MF(m, "اخرج", s_exit, 0, 1); MF(m, "نفذ", s_exec, 1, 2); MF(m, "شغل", s_run, 1, 1); MF(m, "مسار", s_cwd, 0, 0);
 #ifdef __ANDROID__
   dset(&m->d, KX("منصة"), mkstr("android", 7));
 #else
@@ -697,8 +702,8 @@ static void init_natives(void) {
   MF(m, "اتصل", ws_connect, 1, 2); MF(m, "ترقية", ws_upgrade, 1, 1); MF(m, "ارسل", ws_send, 2, 3); MF(m, "استقبل", ws_recv_n, 1, 2);
   MF(m, "نبض", ws_ping, 1, 1); MF(m, "اغلق", ws_close, 1, 1);
   m = mkmod("تشفير");
-  MF(m, "sha1", c_sha1, 1, 2); MF(m, "sha256", c_sha256, 1, 2); MF(m, "hmac_sha256", c_hmac, 2, 3); MF(m, "base64", c_b64, 1, 1);
-  MF(m, "فك_base64", c_unb64, 1, 1); MF(m, "hex", c_hex, 1, 1); MF(m, "فك_hex", c_unhex, 1, 1); MF(m, "عشوائي_بايتات", c_rand, 1, 1);
+  MF(m, "sha1", c_sha1, 1, 2); MF(m, "sha256", c_sha256, 1, 2); MF(m, "hmac_sha256", c_hmac, 2, 3); MF(m, "hmac_sha1", c_hmac_sha1, 2, 3); MF(m, "base64", c_b64, 1, 1);
+  MF(m, "base64_قياسي", c_b64, 1, 1); MF(m, "base64_رابط", c_b64url, 1, 1); MF(m, "فك_base64", c_unb64, 1, 1); MF(m, "hex", c_hex, 1, 1); MF(m, "فك_hex", c_unhex, 1, 1); MF(m, "عشوائي_بايتات", c_rand, 1, 1);
   m = mkmod("نمط");
   MF(m, "ابحث", rx_find, 2, 3); MF(m, "هل", rx_test, 2, 3); MF(m, "مطابق_كامل", rx_full, 2, 3); MF(m, "كل", rx_all, 2, 3); MF(m, "قسم", rx_split, 2, 3); MF(m, "ابدل", rx_replace, 3, 4);
 #if SOLAN_FFI

@@ -42,14 +42,28 @@ static void hmac_sha256(const uint8_t *key, size_t kl, const uint8_t *d, size_t 
   uint8_t *t = xalloc(64 + n); memcpy(t, ip, 64); memcpy(t + 64, d, n); uint8_t inner[32]; sha256_raw(t, 64 + n, inner); free(t);
   uint8_t t2[96]; memcpy(t2, op, 64); memcpy(t2 + 64, inner, 32); sha256_raw(t2, 96, out);
 }
+static void hmac_sha1(const uint8_t *key, size_t kl, const uint8_t *d, size_t n, uint8_t out[20]) {
+  uint8_t k[64] = {0}, ip[64], op[64];
+  if (kl > 64) sha1_raw(key, kl, k); else memcpy(k, key, kl);
+  for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
+  uint8_t *t = xalloc(64 + n); memcpy(t, ip, 64); memcpy(t + 64, d, n); uint8_t inner[20]; sha1_raw(t, 64 + n, inner); free(t);
+  uint8_t t2[84]; memcpy(t2, op, 64); memcpy(t2 + 64, inner, 20); sha1_raw(t2, 84, out);
+}
 static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static void b64_enc(const uint8_t *d, size_t n, Buf *o) {
+static void b64_enc_ex(const uint8_t *d, size_t n, Buf *o, bool url) {
+  const char *A = url ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" : B64;
   for (size_t i = 0; i < n; i += 3) {
     uint32_t v = d[i] << 16 | (i + 1 < n ? d[i + 1] << 8 : 0) | (i + 2 < n ? d[i + 2] : 0);
-    buf_addc(o, B64[(v >> 18) & 63]); buf_addc(o, B64[(v >> 12) & 63]);
-    buf_addc(o, i + 1 < n ? B64[(v >> 6) & 63] : '='); buf_addc(o, i + 2 < n ? B64[v & 63] : '=');
+    buf_addc(o, A[(v >> 18) & 63]); buf_addc(o, A[(v >> 12) & 63]);
+    if (url) { /* آمن للروابط: بلا حشو '=' */
+      if (i + 1 < n) buf_addc(o, A[(v >> 6) & 63]);
+      if (i + 2 < n) buf_addc(o, A[v & 63]);
+    } else {
+      buf_addc(o, i + 1 < n ? A[(v >> 6) & 63] : '='); buf_addc(o, i + 2 < n ? A[v & 63] : '=');
+    }
   }
 }
+static void b64_enc(const uint8_t *d, size_t n, Buf *o) { b64_enc_ex(d, n, o, false); }
 static bool b64_dec(const char *s, int n, Buf *o) {
   uint32_t v = 0; int bits = 0;
   for (int i = 0; i < n; i++) {
@@ -72,7 +86,13 @@ NAT(c_hmac) {
   hmac_sha256((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, (const uint8_t *)AS_STR(a[1])->chars, AS_STR(a[1])->len, o);
   *res = hex_or_raw(o, 32, argc > 2 && !falsey(a[2])); return true;
 }
+NAT(c_hmac_sha1) {
+  STRA(0); STRA(1); uint8_t o[20];
+  hmac_sha1((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, (const uint8_t *)AS_STR(a[1])->chars, AS_STR(a[1])->len, o);
+  *res = hex_or_raw(o, 20, argc > 2 && !falsey(a[2])); return true;
+}
 NAT(c_b64) { STRA(0); Buf b; buf_init(&b); b64_enc((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, &b); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
+NAT(c_b64url) { STRA(0); Buf b; buf_init(&b); b64_enc_ex((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, true); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
 NAT(c_unb64) { STRA(0); Buf b; buf_init(&b); if (!b64_dec(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b)) { free(b.p); FAIL("base64 غير صالح"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
 NAT(c_hex) { STRA(0); *res = hex_or_raw((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, false); return true; }
 NAT(c_unhex) {
