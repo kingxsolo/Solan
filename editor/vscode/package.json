@@ -4,6 +4,7 @@
   "description": "دعم لغة سولان العربية: تلوين وقصاصات وخادم لغة مدمج بلا تبعيات",
   "version": "1.2.0",
   "publisher": "solan",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.60.0"
   },

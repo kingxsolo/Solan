@@ -25,6 +25,7 @@ DefaultDirName={autopf}\Solan
 DefaultGroupName=سولان
 UninstallDisplayName=سولان (Solan) {#SolanVersion}
 UninstallDisplayIcon={app}\solan.exe
+SetupIconFile=solan.ico
 OutputDir=..\dist
 OutputBaseFilename=Solan-{#SolanVersion}-Setup-x64
 Compression=lzma2/max
