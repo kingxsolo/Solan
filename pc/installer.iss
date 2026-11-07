@@ -59,8 +59,9 @@ Source: "{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 ; إضافة VS Code — ملفات المصدر احتياطاً إلى {app}، والتثبيت الفعلي عبر .vsix في [Code]
+; حزمة .vsix تُنسخ دائماً مع المهمة (حتى بلا VS Code) لتثبيتها يدوياً لاحقاً
 Source: "..\editor\vscode\*"; DestDir: "{app}\editor\vscode"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
-Source: "..\dist\Solan-{#SolanVersion}.vsix"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vscode; Check: VscAvailable
+Source: "..\dist\Solan-{#SolanVersion}.vsix"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vscode
 
 [Icons]
 Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
@@ -210,7 +211,10 @@ begin
 end;
 
 // إيجاد واجهة أوامر VS Code (code.cmd)
+// يفحص المسارين القياسيين ثم يبحث في PATH (يغطي التثبيت المخصص/المحمول)
 function FindCodeCli: string;
+var
+  EnvPath, Part, Remaining: string;
 begin
   Result := '';
   if FileExists(ExpandConstant('{localappdata}\Programs\Microsoft VS Code\bin\code.cmd')) then begin
@@ -220,6 +224,28 @@ begin
   if FileExists(ExpandConstant('{pf}\Microsoft VS Code\bin\code.cmd')) then begin
     Result := ExpandConstant('{pf}\Microsoft VS Code\bin\code.cmd');
     Exit;
+  end;
+  // بحث في PATH: البيئة الحالية ثم سجل المستخدم ثم سجل النظام
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath)
+    or RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', EnvPath) then begin
+    Remaining := EnvPath;
+    while Length(Remaining) > 0 do begin
+      if Pos(';', Remaining) > 0 then begin
+        Part := Copy(Remaining, 1, Pos(';', Remaining) - 1);
+        Remaining := Copy(Remaining, Pos(';', Remaining) + 1, MaxInt);
+      end else begin
+        Part := Remaining;
+        Remaining := '';
+      end;
+      Part := Trim(Part);
+      // إزالة اقتباس محتمل حول المدخل
+      if (Length(Part) > 1) and (Copy(Part, 1, 1) = '"') then
+        Part := Copy(Part, 2, Length(Part) - 2);
+      if (Part <> '') and FileExists(Part + '\code.cmd') then begin
+        Result := Part + '\code.cmd';
+        Exit;
+      end;
+    end;
   end;
 end;
 
