@@ -704,6 +704,9 @@ static void init_natives(void) {
   m = mkmod("تشفير");
   MF(m, "sha1", c_sha1, 1, 2); MF(m, "sha256", c_sha256, 1, 2); MF(m, "hmac_sha256", c_hmac, 2, 3); MF(m, "hmac_sha1", c_hmac_sha1, 2, 3); MF(m, "base64", c_b64, 1, 1);
   MF(m, "base64_قياسي", c_b64, 1, 1); MF(m, "base64_رابط", c_b64url, 1, 1); MF(m, "فك_base64", c_unb64, 1, 1); MF(m, "hex", c_hex, 1, 1); MF(m, "فك_hex", c_unhex, 1, 1); MF(m, "عشوائي_بايتات", c_rand, 1, 1);
+  MF(m, "sha512", c_sha512, 1, 2);
+  MF(m, "x25519_سر", c_x25519_sec, 0, 1); MF(m, "x25519_عام", c_x25519_pub, 1, 1); MF(m, "x25519_مشترك", c_x25519_shared, 2, 2);
+  MF(m, "ed25519_سر", c_ed25519_sec, 0, 1); MF(m, "ed25519_عام", c_ed25519_pub, 1, 1); MF(m, "ed25519_وقّع", c_ed25519_sign, 2, 2); MF(m, "ed25519_تحقق", c_ed25519_verify, 3, 3);
   m = mkmod("نمط");
   MF(m, "ابحث", rx_find, 2, 3); MF(m, "هل", rx_test, 2, 3); MF(m, "مطابق_كامل", rx_full, 2, 3); MF(m, "كل", rx_all, 2, 3); MF(m, "قسم", rx_split, 2, 3); MF(m, "ابدل", rx_replace, 3, 4);
 #if SOLAN_FFI

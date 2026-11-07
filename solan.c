@@ -22,6 +22,7 @@
 #include "src/lib/json.inc"
 #include "src/lib/pkgs.inc"
 #include "src/lib/hash.inc"
+#include "src/lib/curve.inc"
 #include "src/lib/tls_net.inc"
 #include "src/lib/http_ws.inc"
 #include "src/lib/timers.inc"
