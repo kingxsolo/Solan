@@ -54,7 +54,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.1.0" ;;
+            *)  VER="1.2.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -126,7 +126,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.1.0" ;;
+            *)  VER="1.2.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -176,7 +176,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.1.0" ;;
+            *)  VER="1.2.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -295,7 +295,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.1.0" ;;
+            *)  VER="1.2.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 

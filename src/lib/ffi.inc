@@ -61,4 +61,5 @@ NAT(ffi_read_str) {
 NAT(ffi_write_str) { PERM(PM_NATIVE); NUMA(0); STRA(1); memcpy((void *)(uintptr_t)a[0].as.n, AS_STR(a[1])->chars, AS_STR(a[1])->len + 1); *res = NIL; return true; }
 #else
 #define SOLAN_FFI 0
+NAT(ffi_na) { (void)argc; (void)a; FAIL("ffi غير متاح على هذه المعمارية (يتطلب بناء 64-بت)"); }
 #endif

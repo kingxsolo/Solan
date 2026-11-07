@@ -4,7 +4,7 @@
 ;  البناء: ISCC pc\installer.iss /DExeName=dist\solan.exe
 ; =====================================================================
 #ifndef SolanVersion
-#define SolanVersion "1.1.0"
+#define SolanVersion "1.2.0"
 #endif
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"

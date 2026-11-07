@@ -32,8 +32,8 @@ if ($userPath -notlike "*$Prefix\bin*") {
 }
 
 # 4) المُثبِّت الجاهز للتوزيع
-if (Test-Path "dist\Solan-1.1.0-Setup-x64.exe") {
-  Write-Host "المُثبِّت جاهز للتوزيع: dist\Solan-1.1.0-Setup-x64.exe" -ForegroundColor Green
+if (Test-Path "dist\Solan-1.2.0-Setup-x64.exe") {
+  Write-Host "المُثبِّت جاهز للتوزيع: dist\Solan-1.2.0-Setup-x64.exe" -ForegroundColor Green
 }
 
 Write-Host "تم! جرّب:  solan --version" -ForegroundColor Green

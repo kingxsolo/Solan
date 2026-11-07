@@ -10,12 +10,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "Solan Project"
       VALUE "FileDescription",  "Solan - Arabic Programming Language (Native Windows Build)"
-      VALUE "FileVersion",      "1.1.0"
+      VALUE "FileVersion",      "1.2.0"
       VALUE "InternalName",     "solan"
       VALUE "LegalCopyright",   "Solan Project"
       VALUE "OriginalFilename", "solan.exe"
       VALUE "ProductName",      "Solan"
-      VALUE "ProductVersion",   "1.1.0"
+      VALUE "ProductVersion",   "1.2.0"
     END
   END
 END

@@ -483,7 +483,14 @@ NAT(sk_sendto) {
     struct addrinfo h, *r; memset(&h, 0, sizeof h); h.ai_family = AF_INET; if (getaddrinfo(AS_STR(a[1])->chars, NULL, &h, &r)) FAIL("تعذّر حل العنوان");
     sa.sin_addr = ((struct sockaddr_in *)r->ai_addr)->sin_addr; freeaddrinfo(r);
   }
-  ssize_t w = sendto(fd, s->chars, s->len, 0, (struct sockaddr *)&sa, sizeof sa); if (w < 0) FAIL("فشل إرسال UDP");
+  ssize_t w = sendto(fd, s->chars, s->len, 0, (struct sockaddr *)&sa, sizeof sa);
+  if (w < 0) {
+#ifdef _WIN32
+    FAIL("فشل إرسال UDP (رمز الخطأ %d)", WSAGetLastError());
+#else
+    FAIL("فشل إرسال UDP (رمز الخطأ %d)", errno);
+#endif
+  }
   *res = NUMV((double)w); return true;
 }
 NAT(sk_recvfrom) {

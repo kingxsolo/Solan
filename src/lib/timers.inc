@@ -44,7 +44,7 @@ static int loop_iter(void) {
   return 1;
 }
 NAT(lp_run) { loop_stop = false; while (!loop_stop) { int r = loop_iter(); if (r < 0) return false; if (r == 0) break; } *res = NIL; return true; }
-NAT(lp_step) { int r = loop_iter(); if (r < 0) return false; *res = BOOLV(r > 0); return true; }
+NAT(lp_step) { loop_stop = false; int r = loop_iter(); if (r < 0) return false; *res = BOOLV(r > 0); return true; } /* إصلاح 1.2.0: اوقف() كانت تعطّل مضخة شغل() غير المتزامن أبدياً */
 NAT(s_bg) { SAFE(); STRA(0); Buf c; buf_init(&c);
 #if SOLAN_WIN
   buf_fmt(&c, "start /b \"\" cmd /c \"%s\" >NUL 2>&1", AS_STR(a[0])->chars);

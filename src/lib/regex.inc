@@ -502,7 +502,53 @@ NAT(n_digits_mode) {
 }
 NAT(f_size) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; if (sstat(AS_STR(a[0])->chars, &st) != 0) { *res = NIL; return true; } *res = NUMV((double)st.st_size); return true; }
 NAT(f_isdir) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; *res = BOOLV(sstat(AS_STR(a[0])->chars, &st) == 0 && S_ISDIR(st.st_mode)); return true; }
-NAT(f_abs) { STRA(0); char b[PATH_MAX]; if (!realpath(AS_STR(a[0])->chars, b)) { *res = NIL; return true; } *res = mkstr(b, (int)strlen(b)); return true; }
+/* تطبيع نصي للمسار إلى مطلق بلا اشتراط وجود الملف (1.2.0) */
+#ifndef _WIN32
+static char *abs_lexical(const char *in, char *out, size_t cap) {
+  char cwd[PATH_MAX]; if (!getcwd(cwd, sizeof cwd)) return NULL;
+  char tmp[PATH_MAX * 2];
+  int abs = in[0] == '/' || in[0] == '\\' || (in[0] && in[1] == ':') || ((in[0] == '/' || in[0] == '\\') && (in[1] == '/' || in[1] == '\\'));
+  if (abs) snprintf(tmp, sizeof tmp, "%s", in);
+  else snprintf(tmp, sizeof tmp, "%s%c%s", cwd, '/', in);
+  for (char *p = tmp; *p; p++) if (*p == '\\') *p = '/';
+  const char *segs[96]; int slen[96], ns = 0;
+  char *p = tmp;
+  while (*p) {
+    while (*p == '/') p++;
+    if (!*p) break;
+    char *st = p; while (*p && *p != '/') p++;
+    int ln = (int)(p - st);
+    if (ln == 1 && st[0] == '.') continue;
+    if (ln == 2 && st[0] == '.' && st[1] == '.') {
+      if (ns > 0 && !(segs[ns - 1][0] == '.' && segs[ns - 1][1] == '.' && slen[ns - 1] == 2)) { ns--; continue; }
+      if (!abs && ns < 96) { segs[ns] = st; slen[ns] = 2; ns++; }
+      continue;
+    }
+    if (ns < 96) { segs[ns] = st; slen[ns] = ln; ns++; }
+  }
+  size_t o = 0;
+  if (abs && o + 1 < cap) out[o++] = '/';
+  for (int i = 0; i < ns; i++) {
+    if (i > 0 && o + 1 < cap) out[o++] = '/';
+    if (o + (size_t)slen[i] < cap) { memcpy(out + o, segs[i], (size_t)slen[i]); o += (size_t)slen[i]; }
+  }
+  if (o == 0 && cap > 1) out[o++] = abs ? '/' : '.';
+  out[o] = 0;
+  return out;
+}
+#endif
+NAT(f_abs) {
+  STRA(0); char b[PATH_MAX]; const char *in = AS_STR(a[0])->chars;
+#ifdef _WIN32
+  if (_fullpath(b, in, PATH_MAX)) { *res = mkstr(b, (int)strlen(b)); return true; }
+  *res = NIL; return true;
+#else
+  if (realpath(in, b)) { *res = mkstr(b, (int)strlen(b)); return true; }
+  char out[PATH_MAX * 2];
+  if (abs_lexical(in, out, sizeof out)) { *res = mkstr(out, (int)strlen(out)); return true; }
+  *res = NIL; return true;
+#endif
+}
 static bool rt_mkdirs(const char *path) {
   char d[PATH_MAX]; if (strlen(path) >= sizeof d) return false;
   snprintf(d, sizeof d, "%s", path);
@@ -712,6 +758,9 @@ static void init_natives(void) {
 #if SOLAN_FFI
   m = mkmod("ffi"); MF(m, "افتح", ffi_open, 0, 1); MF(m, "ربط", ffi_bind, 3, 3); MF(m, "ذاكرة", ffi_alloc, 1, 1); MF(m, "حرر", ffi_free, 1, 1);
   MF(m, "اقرأ_نص", ffi_read_str, 1, 2); MF(m, "اكتب_نص", ffi_write_str, 2, 2);
+#else
+  m = mkmod("ffi"); MF(m, "افتح", ffi_na, 0, 1); MF(m, "ربط", ffi_na, 3, 3); MF(m, "ذاكرة", ffi_na, 1, 1); MF(m, "حرر", ffi_na, 1, 1);
+  MF(m, "اقرأ_نص", ffi_na, 1, 2); MF(m, "اكتب_نص", ffi_na, 2, 2);   /* إصلاح 1.2.0: وحدة وهمية برسالة واضحة بدل فشل الاستيراد على 32-بت */
 #endif
   m = mkmod("قاعدة"); MF(m, "افتح", db_open, 1, 1); MF(m, "اغلق", db_close, 1, 1); MF(m, "نفذ", db_exec, 2, 3); MF(m, "استعلم", db_query, 2, 3);
   m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1);

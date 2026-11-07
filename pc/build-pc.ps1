@@ -19,7 +19,7 @@ param(
 $ErrorActionPreference = "Continue"   # ملاحظة: أخطاء المترجمات تُكشف عبر $LASTEXITCODE وليس عبر استثناءات PowerShell
 Set-Location (Join-Path $PSScriptRoot "..")
 
-$VER = "1.1.0"
+$VER = "1.2.0"
 $OUT = "dist"
 New-Item -ItemType Directory -Force -Path $OUT | Out-Null
 
@@ -195,7 +195,7 @@ if ($Installer) {
     $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   }
   if (-not $iscc) { Write-Host "✗ لم أجد ISCC.exe — ثبّت Inno Setup يدوياً" -ForegroundColor Yellow; exit 1 }
-  & $iscc "pc\installer.iss" /DExeName=$exe
+  & $iscc "pc\installer.iss" "/DExeName=$(Join-Path (Get-Location) $exe)"   # مسار مطلق: ISCC يحل النسبي نسبة إلى مجلد .iss
   if ($LASTEXITCODE -ne 0) { throw "فشل بناء المُثبِّت" }
   Write-Host "✓ المُثبِّت: $OUT\Solan-Setup.exe" -ForegroundColor Green
   }

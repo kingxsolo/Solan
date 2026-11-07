@@ -2,7 +2,7 @@
   "name": "solan-lang",
   "displayName": "Solan — سولان",
   "description": "دعم لغة سولان العربية: تلوين وقصاصات وخادم لغة مدمج بلا تبعيات",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "solan",
   "engines": {
     "vscode": "^1.60.0"

@@ -445,6 +445,12 @@ static int w_poll(struct pollfd *p, unsigned n, int t) {
   for (unsigned i = 0; i < n; i++) p[i].fd = (SOCKET)sv[i];
   free(sv); return r;
 }
+static ssize_t w_sendto(int fd, const void *b, size_t n, int f, const struct sockaddr *a, socklen_t l) {
+  int r = (int)sendto(w_s(fd), (const char *)b, (int)(n > 0x40000000 ? 0x40000000 : n), f, a, l); if (r < 0) w_seterr(); return r;
+}
+static ssize_t w_recvfrom(int fd, void *b, size_t n, int f, struct sockaddr *a, socklen_t *l) {
+  int r = recvfrom(w_s(fd), (char *)b, (int)(n > 0x40000000 ? 0x40000000 : n), f, a, l); if (r < 0) w_seterr(); return r;
+}
 #define socket(a, b, c) w_socket(a, b, c)
 #define accept(f, a, l) w_accept(f, a, l)
 #define close(f) w_close(f)
@@ -456,6 +462,8 @@ static int w_poll(struct pollfd *p, unsigned n, int t) {
 #define shutdown(f, h) w_shutdown(f, h)
 #define recv(f, b, n, fl) w_recv(f, b, n, fl)
 #define send(f, b, n, fl) w_send(f, b, n, fl)
+#define sendto(f, b, n, fl, a, l) w_sendto(f, b, n, fl, a, l)
+#define recvfrom(f, b, n, fl, a, l) w_recvfrom(f, b, n, fl, a, l)
 #define read(f, b, n) w_read(f, b, n)
 #define write(f, b, n) w_write(f, b, n)
 #define fcntl w_fcntl
