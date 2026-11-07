@@ -235,8 +235,9 @@ begin
   codeCmd := FindCodeCli;
   if (Length(codeCmd) > 0) and FileExists(vsix) then begin
     // علامتا اقتباس خارجيتان: قاعدة cmd /c تزيل الأولى والأخيرة من 4 اقتباسات
+    // --force: إعادة الاستخراج حتى لو اعتُبرت الإضافة مثبتة (قد يكون مجلدها مفقوداً)
     if Exec(ExpandConstant('{sys}\cmd.exe'),
-            '/c ""' + codeCmd + '" --install-extension "' + vsix + '""',
+            '/c ""' + codeCmd + '" --install-extension "' + vsix + '" --force""',
             '', SW_HIDE, ewWaitUntilTerminated, resultCode) then
       if (resultCode = 0) and DirExists(extDir) then
         Exit;  // نجح التثبيت عبر واجهة VS Code
@@ -261,13 +262,21 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  extDir: string;
+  extDir, codeCmd: string;
+  resultCode: integer;
 begin
   if CurUninstallStep = usPostUninstall then begin
     EnvRemovePath(ExpandConstant('{app}'));
     // إزالة إضافة VS Code من مكانها الحقيقي (~\.vscode\extensions)
     if VscAvailable then begin
       extDir := GetVscExtDir('');
+      // إزالة التسجيل من فهرس VS Code أولاً (يمنع حالة "مسجّلة بلا ملفات")
+      codeCmd := FindCodeCli;
+      if Length(codeCmd) > 0 then
+        Exec(ExpandConstant('{sys}\cmd.exe'),
+             '/c ""' + codeCmd + '" --uninstall-extension solan.solan-lang""',
+             '', SW_HIDE, ewWaitUntilTerminated, resultCode);
+      // ثم ضمان حذف المجلد حتى لو فشل CLI
       DelTree(extDir, True, True, True);
     end;
   end;

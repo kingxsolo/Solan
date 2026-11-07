@@ -2235,6 +2235,7 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 | `third_party/sqlite/` | مصدر SQLite للتضمين الاختياري وقت البناء |
 | `pc/` | بناء نسخة ويندوز الأصلية: سكربتات البناء (`build-pc.ps1`، `build-vsix.ps1`) والمترجم المحمول والمُثبِّت وموارده (أيقونة، manifest، ترجمة عربية) |
 | `editor/vscode/` | إضافة VS Code (تلوين، قصاصات، عميل LSP) |
+| `assets/` | الهوية البصرية: البانر (`solan-banner.jpg`) والشعار الشفاف (`solan-logo.png`) وسكربت `make-icons.ps1` الذي يولّد الأيقونات (شفافة) من البانر |
 | `dist/` | النواتج الجاهزة بعد البناء (الملفات التنفيذية، المُثبِّت، حزمة الإضافة `.vsix`) |
 
 ### إضافة دالة أصلية جديدة
