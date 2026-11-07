@@ -1,4 +1,4 @@
-# =====================================================================
+﻿# =====================================================================
 #  سولان — بناء واختبار وإصدار على كل المنصات
 #  - كل دفع: يبني ويختبر (ويندوز 64+32، لينكس ثابت، ماك يونيفرسال)
 #  - وسم v* : يبني المُثبِّتات الأصلية وينشر إصداراً بكل الملفات
@@ -85,7 +85,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path حزمة | Out-Null
           Copy-Item solan.exe حزمة/
-          Copy-Item README-PC.md, LICENSE حزمة/
+          Copy-Item README.md, LICENSE حزمة/
           Compress-Archive -Path حزمة/* -DestinationPath "Solan-$env:VER-windows-${{ matrix.arch }}.zip" -Force
 
       - name: المُثبِّت العربي Setup.exe (x64 فقط)
@@ -149,7 +149,7 @@ jobs:
       - name: حزمة محمولة
         run: |
           mkdir -p "حزمة/Solan-$VER-linux-x64"
-          cp solan README.md LICENSE INSTALL.md "حزمة/Solan-$VER-linux-x64/"
+          cp solan README.md LICENSE "حزمة/Solan-$VER-linux-x64/"
           tar czf "Solan-$VER-linux-x64.tar.gz" -C حزمة "Solan-$VER-linux-x64"
 
       - name: رفع المخرجات
@@ -200,7 +200,7 @@ jobs:
         run: |
           mkdir -p "حزمة/Solan-$VER-linux-arm64"
           cp solan-arm64 "حزمة/Solan-$VER-linux-arm64/solan"
-          cp README.md LICENSE INSTALL.md "حزمة/Solan-$VER-linux-arm64/"
+          cp README.md LICENSE "حزمة/Solan-$VER-linux-arm64/"
           tar czf "Solan-$VER-linux-arm64.tar.gz" -C حزمة "Solan-$VER-linux-arm64"
 
       - name: رفع المخرجات
@@ -336,7 +336,7 @@ jobs:
       - name: حزمة محمولة
         run: |
           mkdir -p "حزمة/Solan-$VER-macos"
-          cp solan README.md LICENSE INSTALL.md "حزمة/Solan-$VER-macos/"
+          cp solan README.md LICENSE "حزمة/Solan-$VER-macos/"
           tar czf "Solan-$VER-macos-universal.tar.gz" -C حزمة "Solan-$VER-macos"
 
       - name: المُثبِّت pkg
@@ -393,7 +393,7 @@ jobs:
           | ترمكس (أندرويد) | — | `pkg install -y clang git` ثم `git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh` (بناء من المصدر داخل ترمكس، دقائق قليلة) |
 
           **من المصدر على أي منصة**: `sh install.sh` — يكتشف بيئتك ويبني ويثبّت.
-          التفاصيل الكاملة في [INSTALL.md](INSTALL.md).
+          التفاصيل الكاملة في [README.md](README.md).
 
           - ويندوز 64-بت ولينكس 64-بت ولينكس ARM64 وماك (Intel وApple Silicon): **JIT مفعّل** (حلقات أسرع بعدة مرات)
           - ويندوز 32-بت: مفسَّر كامل الوظائف

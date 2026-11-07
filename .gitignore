@@ -19,6 +19,7 @@ third_party/sqlite/*.o
 
 # PC build outputs
 /dist/
+/release/
 /tools/*
 !/tools/jit-verify/
 pc/solan.res

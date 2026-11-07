@@ -49,20 +49,20 @@ arabic.CreateDesktopIcon=إنشاء أيقونة على سطح المكتب
 arabic.AddToPath=إضافة سولان إلى متغير PATH (لتشغيله من أي طرفية)
 arabic.AssocFiles=ربط ملفات سولان (.سو .an .solan) بالبرنامج
 arabic.RunAfter=تشغيل سولان الآن (اختبار التثبيت)
-arabic.OpenReadme=فتح دليل النسخة الشخصية للويندوز
+arabic.OpenReadme=فتح دليل اللغة (README)
 arabic.LongPaths=تفعيل دعم المسارات الطويلة في ويندوز (يتطلب صلاحيات مدير)
 arabic.VscodeExt=تثبيت إضافة VS Code (تلوين وقصاصات وخادم اللغة)
 
 [Files]
 Source: "{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README-PC.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 ; إضافة VS Code — تُنسخ إلى مجلد الإضافات الخاص بالمستخدم عبر {code:GetVscExtDir}
 Source: "..\editor\vscode\*"; DestDir: "{code:GetVscExtDir}"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
 
 [Icons]
 Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
-Name: "{group}\دليل سولان للويندوز"; Filename: "{app}\README-PC.md"
+Name: "{group}\دليل سولان (README)"; Filename: "{app}\README.md"
 Name: "{group}\إزالة تثبيت سولان"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\سولان"; Filename: "{app}\solan.exe"; Tasks: desktopicon
 
@@ -90,7 +90,7 @@ Type: filesandordirs; Name: "{userappdata}\Code\extensions\solan.solan-lang-{#So
 
 [Run]
 Filename: "{app}\solan.exe"; Parameters: "-e ""اطبع('سولان مثبَّت بنجاح ✓')"""; Description: "{cm:RunAfter}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\README-PC.md"; Description: "{cm:OpenReadme}"; Flags: postinstall skipifsilent shellexec
+Filename: "{app}\README.md"; Description: "{cm:OpenReadme}"; Flags: postinstall skipifsilent shellexec
 
 [Code]
 // إضافة مجلد التثبيت إلى PATH الخاص بالمستخدم
