@@ -6,6 +6,10 @@ typedef struct {
   int (*SSL_read)(void *, void *, int); int (*SSL_write)(void *, const void *, int); int (*SSL_shutdown)(void *);
   void (*SSL_free)(void *); int (*SSL_get_error)(const void *, int); int (*SSL_pending)(const void *);
   int (*SSL_CTX_use_certificate_chain_file)(void *, const char *); int (*SSL_CTX_use_PrivateKey_file)(void *, const char *, int);
+  /* اختيارية — لبصمة TLS (متوفرة في OpenSSL 1.1.1+) */
+  int (*SSL_CTX_set_cipher_list)(void *, const char *); int (*SSL_CTX_set_ciphersuites)(void *, const char *);
+  int (*SSL_CTX_set1_groups_list)(void *, const char *); int (*SSL_set_alpn_protos)(void *, const unsigned char *, unsigned int);
+  void (*SSL_CTX_free)(void *); int (*SSL_CTX_load_verify_locations)(void *, const char *, const char *);
 } TLSLib;
 static TLSLib tl; static int tls_state = 0; static void *ctx_verify, *ctx_noverify;
 static void *ssl_of[MAXFD]; static int tmo_ms[MAXFD]; static unsigned char fflag[MAXFD]; static Buf rbuf[MAXFD]; static void *srv_ctx[MAXFD];
@@ -43,13 +47,33 @@ static bool tls_load(void) {
   LS(SSL_new); LS(SSL_set_fd); LS(SSL_ctrl); LS(SSL_connect); LS(SSL_accept); LS(SSL_read); LS(SSL_write); LS(SSL_shutdown);
   LS(SSL_free); LS(SSL_get_error); LS(SSL_pending); LS(SSL_CTX_use_certificate_chain_file); LS(SSL_CTX_use_PrivateKey_file);
   *(void **)&tl.SSL_set1_host = dlsym(tl.h, "SSL_set1_host");
+  *(void **)&tl.SSL_CTX_set_cipher_list = dlsym(tl.h, "SSL_CTX_set_cipher_list");
+  *(void **)&tl.SSL_CTX_set_ciphersuites = dlsym(tl.h, "SSL_CTX_set_ciphersuites");
+  *(void **)&tl.SSL_CTX_set1_groups_list = dlsym(tl.h, "SSL_CTX_set1_groups_list");
+  *(void **)&tl.SSL_set_alpn_protos = dlsym(tl.h, "SSL_set_alpn_protos");
+  *(void **)&tl.SSL_CTX_free = dlsym(tl.h, "SSL_CTX_free");
+  *(void **)&tl.SSL_CTX_load_verify_locations = dlsym(tl.h, "SSL_CTX_load_verify_locations");
   tls_state = 1; return true;
+}
+/* شهادات الجذر: المسارات الافتراضية + حزم CA المعروفة (Git وغيرها) دائماً —
+   لأن set_default_verify_paths قد "ينجح" على ويندوز دون تحميل أي شهادة */
+static void tls_set_verify_paths(void *ctx) {
+  tl.SSL_CTX_set_default_verify_paths(ctx);
+  if (!tl.SSL_CTX_load_verify_locations) return;
+  static char b1[PATH_MAX];
+  const char *pf = getenv("ProgramFiles");
+  const char *bundles[4]; int n = 0;
+  if (pf && *pf) { snprintf(b1, sizeof b1, "%s/Git/mingw64/etc/ssl/certs/ca-bundle.crt", pf); bundles[n++] = b1; }
+  bundles[n++] = "/etc/ssl/certs/ca-certificates.crt";
+  bundles[n++] = "/etc/pki/tls/certs/ca-bundle.crt";
+  bundles[n] = NULL;
+  for (int i = 0; i < n; i++) if (tl.SSL_CTX_load_verify_locations(ctx, bundles[i], NULL)) return;
 }
 static void *get_ctx(bool verify) {
   void **c = verify ? &ctx_verify : &ctx_noverify;
   if (!*c) {
     void *x = tl.SSL_CTX_new(tl.TLS_client_method()); if (!x) return NULL;
-    if (verify) { tl.SSL_CTX_set_default_verify_paths(x); tl.SSL_CTX_set_verify(x, 1, NULL); } else tl.SSL_CTX_set_verify(x, 0, NULL);
+    if (verify) { tls_set_verify_paths(x); tl.SSL_CTX_set_verify(x, 1, NULL); } else tl.SSL_CTX_set_verify(x, 0, NULL);
     *c = x;
   }
   return *c;
@@ -250,14 +274,85 @@ static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, 
   if (code != 0) { snprintf(err, es, "رفض البروكسي الاتصال بالهدف (رمز %d)", code); return false; }
   return true;
 }
-static bool tls_wrap_client(int fd, const char *host, bool verify, char *err, int es) {
+/* ============ بصمة TLS ============ */
+typedef struct {
+  const char *ciphers;      /* تشفيرات TLS1.2 وأقدم — بالترتيب */
+  const char *ciphersuites; /* تشفيرات TLS1.3 */
+  const char *groups;       /* منحنيات تبادل المفاتيح */
+  const char *alpn;         /* قائمة بفواصل: "http/1.1" */
+  int minver, maxver;       /* 0x0303 = 1.2، 0x0304 = 1.3؛ 0 = افتراضي */
+} TlsOpts;
+static bool tls_opts_preset(const char *name, TlsOpts *o) {
+  memset(o, 0, sizeof *o);
+  if (!strcmp(name, "chrome") || !strcmp(name, "android")) {
+    o->minver = 0x0303; o->maxver = 0x0304;
+    o->ciphers = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384";
+    o->ciphersuites = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
+    o->groups = "X25519:P-256:P-384";
+    o->alpn = "http/1.1";
+    return true;
+  }
+  if (!strcmp(name, "firefox")) {
+    o->minver = 0x0303; o->maxver = 0x0304;
+    o->ciphers = "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA";
+    o->ciphersuites = "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384";
+    o->groups = "X25519:P-256:P-384:P-521";
+    o->alpn = "http/1.1";
+    return true;
+  }
+  if (!strcmp(name, "curl")) { o->minver = 0x0303; o->alpn = "http/1.1"; return true; }
+  return false;
+}
+/* تحويل قائمة ALPN "http/1.1,h2" إلى الشكل السلكي (طول+بايتات) */
+static int alpn_wire(const char *alpn, unsigned char *w, int wn) {
+  int n = 0; const char *p = alpn;
+  while (*p) {
+    const char *e = strchr(p, ','); int l = e ? (int)(e - p) : (int)strlen(p);
+    while (l > 0 && p[0] == ' ') { p++; l--; }
+    while (l > 0 && p[l - 1] == ' ') l--;
+    if (l <= 0) { if (!e) break; p = e + 1; continue; }
+    if (n + 1 + l > wn) return -1;
+    w[n++] = (unsigned char)l; memcpy(w + n, p, (size_t)l); n += l;
+    if (!e) break; p = e + 1;
+  }
+  return n;
+}
+static bool tls_wrap_client_ex(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es) {
   if (!tls_load()) { snprintf(err, es, "التشفير غير متاح: لم أجد libssl — %s", TLS_HINT); return false; }
-  void *ctx = get_ctx(verify); void *ssl = ctx ? tl.SSL_new(ctx) : NULL;
+  void *ctx = NULL; bool own = false;
+  if (o && (o->ciphers || o->ciphersuites || o->groups || o->alpn || o->minver || o->maxver)) {
+    /* سياق مخصص للطلب — لا نلمس السياق المشترك */
+    ctx = tl.SSL_CTX_new(tl.TLS_client_method()); own = true;
+    if (!ctx) { snprintf(err, es, "تعذّر إنشاء جلسة TLS مخصصة"); return false; }
+    tl.SSL_CTX_set_verify(ctx, verify ? 1 : 0, NULL);
+    if (verify) tls_set_verify_paths(ctx);
+    if (o->minver) tl.SSL_ctrl(ctx, 123, o->minver, NULL); /* SET_MIN_PROTO_VERSION */
+    if (o->maxver) tl.SSL_ctrl(ctx, 124, o->maxver, NULL); /* SET_MAX_PROTO_VERSION */
+    if (o->ciphers && tl.SSL_CTX_set_cipher_list && !tl.SSL_CTX_set_cipher_list(ctx, o->ciphers)) {
+      tl.SSL_CTX_free(ctx); snprintf(err, es, "قائمة تشفيرات غير صالحة: %s", o->ciphers); return false;
+    }
+    if (o->ciphersuites && tl.SSL_CTX_set_ciphersuites && !tl.SSL_CTX_set_ciphersuites(ctx, o->ciphersuites)) {
+      tl.SSL_CTX_free(ctx); snprintf(err, es, "تشفيرات TLS1.3 غير صالحة: %s", o->ciphersuites); return false;
+    }
+    if (o->groups && tl.SSL_CTX_set1_groups_list && !tl.SSL_CTX_set1_groups_list(ctx, o->groups)) {
+      tl.SSL_CTX_free(ctx); snprintf(err, es, "قائمة المجموعات غير صالحة: %s", o->groups); return false;
+    }
+  } else ctx = get_ctx(verify);
+  void *ssl = ctx ? tl.SSL_new(ctx) : NULL;
+  if (own && tl.SSL_CTX_free) tl.SSL_CTX_free(ctx); /* SSL يحمل مرجعه الخاص (OpenSSL >= 1.1) */
   if (!ssl) { snprintf(err, es, "تعذّر إنشاء جلسة TLS"); return false; }
   tl.SSL_set_fd(ssl, FDSYS(fd)); tl.SSL_ctrl(ssl, 55, 0, (void *)host);
+  if (o && o->alpn && tl.SSL_set_alpn_protos) {
+    unsigned char w[128]; int n = alpn_wire(o->alpn, w, (int)sizeof w);
+    if (n > 0) tl.SSL_set_alpn_protos(ssl, w, (unsigned)n);
+  }
   if (verify) { if (!tl.SSL_set1_host) { tl.SSL_free(ssl); snprintf(err, es, "نسخة libssl لا تدعم التحقق من اسم المضيف"); return false; } tl.SSL_set1_host(ssl, host); }
   if (tl.SSL_connect(ssl) != 1) { tl.SSL_free(ssl); snprintf(err, es, "فشلت مصافحة TLS مع %s (الشهادة غير موثوقة؟ جرّب {\"تحقق\": غلط})", host); return false; }
-  ssl_of[fd] = ssl; return true;
+  ssl_of[fd] = ssl; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0;
+  return true;
+}
+static bool tls_wrap_client(int fd, const char *host, bool verify, char *err, int es) {
+  return tls_wrap_client_ex(fd, host, verify, NULL, err, es);
 }
 static int listen_on(int port, const char *addr, const char *cert, const char *key, char *err, int es) {
   if (!perm_has(PM_NET)) { snprintf(err, es, "الصلاحية غير ممنوحة: شبكة (فتح منفذ)"); return -1; }

@@ -133,13 +133,25 @@ NAT(j_dec) {
 }
 
 static void shq(Buf *b, const char *s, int n) {
+#if SOLAN_WIN
+  /* cmd.exe لا يفهم الاقتباس المفرد — نستخدم المزدوج مع تهريب الداخلي */
+  buf_addc(b, '"');
+  for (int i = 0; i < n; i++) { if (s[i] == '"') buf_add(b, "\\\"", 2); else buf_addc(b, s[i]); }
+  buf_addc(b, '"');
+#else
   buf_addc(b, '\'');
   for (int i = 0; i < n; i++) { if (s[i] == '\'') buf_add(b, "'\\''", 4); else buf_addc(b, s[i]); }
   buf_addc(b, '\'');
+#endif
 }
 static bool net_fetch_curl(int argc, Value *a, Value *res) {
   PERM(PM_NET);
-  STRA(0); Buf cmd; buf_init(&cmd); buf_fmt(&cmd, "curl -sS -L --max-time 60 -w '\\n%%{http_code}'");
+  STRA(0); Buf cmd; buf_init(&cmd);
+#if SOLAN_WIN
+  buf_fmt(&cmd, "curl.exe -sS -L --max-time 60 -w \"\\n%%{http_code}\"");
+#else
+  buf_fmt(&cmd, "curl -sS -L --max-time 60 -w '\\n%%{http_code}'");
+#endif
   Str *method = NULL; char tmpl[64] = ""; Value body = NIL; bool json_body = false;
   if (argc > 1 && IS_T(a[1], O_MAP)) {
     Dict *o = &AS_MAP(a[1])->d; Value v;
@@ -160,7 +172,13 @@ static bool net_fetch_curl(int argc, Value *a, Value *res) {
     snprintf(tmpl, sizeof tmpl, "%s/solan_XXXXXX", os_tmpdir()); int fd = os_mkstemp(tmpl);
     if (fd < 0) { free(bb.p); free(cmd.p); FAIL("تعذّر إنشاء ملف مؤقت"); }
     if (bb.n) { ssize_t w = write(fd, bb.p, bb.n); (void)w; } close(fd); free(bb.p);
-    if (json_body) buf_add(&cmd, " -H 'Content-Type: application/json'", 35);
+    if (json_body) {
+#if SOLAN_WIN
+      buf_add(&cmd, " -H \"Content-Type: application/json\"", 36);
+#else
+      buf_add(&cmd, " -H 'Content-Type: application/json'", 35);
+#endif
+    }
     buf_add(&cmd, " --data-binary @", 16); shq(&cmd, tmpl, (int)strlen(tmpl));
   }
   buf_add(&cmd, " ", 1); shq(&cmd, AS_STR(a[0])->chars, AS_STR(a[0])->len); buf_add(&cmd, " 2>&1", 5);
