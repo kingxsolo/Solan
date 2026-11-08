@@ -251,7 +251,9 @@ jobs:
         run: |
           sudo apt-get install -y rpm
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          tar czf "rpmbuild/SOURCES/solan-$VER.tar.gz" -C "مدخل/Solan-$VER-linux-x64" solan
+          mkdir -p "solan-$VER"
+          cp "مدخل/Solan-$VER-linux-x64/solan" "solan-$VER/solan"
+          tar czf "rpmbuild/SOURCES/solan-$VER.tar.gz" "solan-$VER"
           cat > rpmbuild/SPECS/solan.spec <<EOF
           Name:           solan
           Version:        $VER
