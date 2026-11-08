@@ -143,7 +143,7 @@ function stop() {
 const listeners = [];
 
 function onOpen(doc) {
-  if (doc.languageId !== "solan") return;
+  if (!isSolan(doc)) return;
   start();
   const uri = doc.uri;
   notify("textDocument/didOpen", {
@@ -158,7 +158,7 @@ function onOpen(doc) {
 
 function onDocsChanged(e) {
   const doc = e.document;
-  if (doc.languageId !== "solan") return;
+  if (!isSolan(doc)) return;
   // إرسال النص الكامل عند أي تعديل (أبسط وأضمن توافق مع الخادم البسيط)
   notify("textDocument/didChange", {
     textDocument: { uri: doc.uri.toString(), version: doc.version },
@@ -167,7 +167,7 @@ function onDocsChanged(e) {
 }
 
 function onClose(doc) {
-  if (doc.languageId !== "solan") return;
+  if (!isSolan(doc)) return;
   notify("textDocument/didClose", {
     textDocument: { uri: doc.uri.toString() }
   });
@@ -181,6 +181,22 @@ function restart() {
 }
 
 // ==================== الإكمال الذكي ====================
+
+// محدد الوثائق: اللغة + أنماط الامتدادات (يضمن العمل في .سو و.an و.solan
+// حتى لو ربطت إضافة أخرى الامتداد بلغة مختلفة)
+const SELECTOR = [
+  { language: "solan" },
+  { pattern: "**/*.سو" },
+  { pattern: "**/*.an" },
+  { pattern: "**/*.solan" }
+];
+
+// هل الوثيقة ملف سولان؟ (باللغة أو بالامتداد)
+function isSolan(doc) {
+  if (doc.languageId === "solan") return true;
+  try { return /\.(سو|an|solan)$/i.test(doc.uri.fsPath || ""); }
+  catch (e) { return false; }
+}
 
 // عدد مرات قبولك لكل اقتراح — محفوظ عبر الجلسات (globalState)
 let usage = {};
@@ -343,9 +359,12 @@ function makeItem(o, ctx, freqs) {
   return item;
 }
 
-// أدخل الاسم مع القوسين ومؤشر داخلها، إلا إذا كتب المستخدم "(" قبله
-function fnInsert(name, doc, ctx) {
-  return nextIsOpenParen(doc, ctx) ? name : name + "($0)";
+// أدخل الاسم كاملاً: مع القوسين ومؤشر داخله، وباقتباسات جاهزة
+// للدوال التي تبدأ بمعامل نصي (اطبع("") والمؤشر بين علامتي التنصيص)
+// وإلا الاسم وحده إذا كتب المستخدم القوس قبله (دوال داخل دوال)
+function fnInsert(name, doc, ctx, wantsQuote) {
+  if (nextIsOpenParen(doc, ctx)) return name;
+  return wantsQuote ? name + "(\"$0\")" : name + "($0)";
 }
 
 function provideItems(doc, pos) {
@@ -364,7 +383,7 @@ function provideItems(doc, pos) {
         kind: isFn ? vscode.CompletionItemKind.Method : vscode.CompletionItemKind.Property,
         detail: m.prop ? "خاصية مدمجة" : "طريقة مدمجة — " + (m.s || m.n + "()"),
         doc: m.d ? "**" + (m.s || m.n) + "**\n\n" + m.d : undefined,
-        insert: isFn ? fnInsert(m.n, doc, ctx) : m.n,
+        insert: isFn ? fnInsert(m.n, doc, ctx, m.q) : m.n,
         isFn: isFn && !nextIsOpenParen(doc, ctx),
         pop: m.p || 20
       }, ctx, freqs));
@@ -410,7 +429,7 @@ function provideItems(doc, pos) {
       kind: isMod ? vscode.CompletionItemKind.Module : vscode.CompletionItemKind.Function,
       detail: isMod ? "وحدة أصلية" : "دالة مدمجة — " + f.s,
       doc: f.d ? "**" + (f.s || f.n) + "**\n\n" + f.d : undefined,
-      insert: isMod ? f.n : fnInsert(f.n, doc, ctx),
+      insert: isMod ? f.n : fnInsert(f.n, doc, ctx, f.q),
       isFn: !isMod && !nextIsOpenParen(doc, ctx),
       pop: f.p || 15,
       filter: data.norm(f.n) !== f.n ? f.n + " " + data.norm(f.n) : undefined
@@ -424,6 +443,14 @@ function provideItems(doc, pos) {
       detail: "مكتبة — استورد \"مكتبة\"",
       insert: mod, pop: 25,
       filter: data.norm(mod) !== mod ? mod + " " + data.norm(mod) : undefined
+    }, ctx, freqs));
+  }
+
+  // ---- العمليات = + == وغيرها: فرادى وبلا أي إضافات ليختار منها ----
+  for (const op of data.OPERATORS) {
+    items.push(makeItem({
+      label: op.n, kind: vscode.CompletionItemKind.Operator,
+      detail: op.d, insert: op.n, pop: op.p || 12
     }, ctx, freqs));
   }
 
@@ -446,8 +473,22 @@ function provideItems(doc, pos) {
   return items;
 }
 
+// حروف العمليات — كتابتها تعرض قائمة العمليات وحدها
+const OP_CHARS = "=+-*/%<>!&|";
+
 const completionProvider = {
-  async provideCompletionItems(doc, pos) {
+  async provideCompletionItems(doc, pos, token, context) {
+    // كتبت عملية (= + < …)؟ اعرض العمليات فرادى لاختيارها فوراً
+    if (context && context.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter &&
+        context.triggerCharacter && OP_CHARS.includes(context.triggerCharacter)) {
+      const ctx = completionContext(doc, pos);
+      ctx.cursor = pos.character;
+      const freqs = docFreqs(doc);
+      return data.OPERATORS.map(op => makeItem({
+        label: op.n, kind: vscode.CompletionItemKind.Operator,
+        detail: op.d, insert: op.n, pop: op.p || 12
+      }, ctx, freqs));
+    }
     const local = provideItems(doc, pos);
     // بعد النقطة: اسأل خادم اللغة عن أعضاء الوحدة (نظام.، ملفات.…) إن كان يعمل
     const ctx = completionContext(doc, pos);
@@ -480,10 +521,10 @@ const completionProvider = {
   }
 };
 
-// حروف التفعيل: كل الحروف العربية واللاتينية والنقطة (اقتراحات أثناء الكتابة)
+// حروف التفعيل: العربية واللاتينية والنقطة وحروف العمليات (اقتراحات أثناء الكتابة)
 const TRIGGERS = "ابتثجحخدذرزسشصضطظعغفقكلمنهويةءآأإئؤةى_".split("")
   .concat("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""))
-  .concat(["."]);
+  .concat([".", "=", "+", "-", "*", "/", "%", "<", ">", "!", "&", "|"]);
 
 // ==================== التحويم (hover) ====================
 
@@ -525,8 +566,8 @@ exports.activate = function (ctx) {
 
   ctx.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
-      { language: "solan" }, completionProvider, ...TRIGGERS),
-    vscode.languages.registerHoverProvider({ language: "solan" }, hoverProvider)
+      SELECTOR, completionProvider, ...TRIGGERS),
+    vscode.languages.registerHoverProvider(SELECTOR, hoverProvider)
   );
 
   listeners.push(
@@ -545,6 +586,24 @@ exports.activate = function (ctx) {
   for (const doc of vscode.workspace.textDocuments) onOpen(doc);
   // امسح تعريفات المشروع عند التفعيل
   scanWorkspace();
+
+  // سؤال واحد عن أيقونات سولان في المستكشف (سمتنا تعرضها حتماً)
+  if (!ctx.globalState.get("solan.iconThemeAsked", false)) {
+    ctx.globalState.update("solan.iconThemeAsked", true);
+    const cur = vscode.workspace.getConfiguration("workbench").get("iconTheme");
+    if (cur !== "solan-icons") {
+      vscode.window.showInformationMessage(
+        "هل تظهر أيقونة سولان على ملفات .سو في المستكشف؟",
+        "نعم، استخدم أيقونات سولان", "لا، شكراً"
+      ).then(pick => {
+        if (pick === "نعم، استخدم أيقونات سولان") {
+          vscode.workspace.getConfiguration("workbench").update(
+            "workbench.iconTheme", "solan-icons",
+            vscode.ConfigurationTarget.Global);
+        }
+      });
+    }
+  }
 };
 
 exports.deactivate = function () {

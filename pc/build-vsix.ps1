@@ -70,7 +70,10 @@ $files = @(
   "file-icon.png",
   "language-configuration.json",
   "syntaxes/solan.tmLanguage.json",
-  "snippets/solan.json"
+  "snippets/solan.json",
+  "fileicons/solan-icon-theme.json",
+  "fileicons/seti.woff",
+  "fileicons/file-icon.png"
 )
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)  # بلا BOM

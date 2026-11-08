@@ -2,7 +2,7 @@
   "name": "solan-lang",
   "displayName": "Solan — سولان",
   "description": "دعم لغة سولان العربية: تلوين وأيقونة ملفات وإكمال ذكي حسب الأكثر استخداماً وقصاصات وخادم لغة مدمج بلا تبعيات",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "publisher": "solan",
   "icon": "icon.png",
   "engines": {
@@ -46,122 +46,130 @@
       }
     ],
     "configurationDefaults": {
-      "[solan]": {
-        "editor.tokenColorCustomizations": {
-          "textMateRules": [
-            {
-              "scope": "comment.line.solan",
-              "settings": {
-                "foreground": "#808080",
-                "fontStyle": "italic"
-              }
-            },
-            {
-              "scope": "comment.block.solan",
-              "settings": {
-                "foreground": "#808080",
-                "fontStyle": "italic"
-              }
-            },
-            {
-              "scope": "string.quoted",
-              "settings": {
-                "foreground": "#87d787"
-              }
-            },
-            {
-              "scope": "constant.numeric.solan",
-              "settings": {
-                "foreground": "#ff875f"
-              }
-            },
-            {
-              "scope": "keyword.control.solan",
-              "settings": {
-                "foreground": "#af87ff",
-                "fontStyle": "bold"
-              }
-            },
-            {
-              "scope": "storage.type.solan",
-              "settings": {
-                "foreground": "#5fafff",
-                "fontStyle": "bold"
-              }
-            },
-            {
-              "scope": "constant.language.solan",
-              "settings": {
-                "foreground": "#ffaf5f"
-              }
-            },
-            {
-              "scope": "variable.language.solan",
-              "settings": {
-                "foreground": "#d7afff",
-                "fontStyle": "italic"
-              }
-            },
-            {
-              "scope": "keyword.operator.word.solan",
-              "settings": {
-                "foreground": "#d787d7"
-              }
-            },
-            {
-              "scope": "keyword.control.import.solan",
-              "settings": {
-                "foreground": "#af87af"
-              }
-            },
-            {
-              "scope": "support.class.module.solan",
-              "settings": {
-                "foreground": "#5fd7af",
-                "fontStyle": "bold"
-              }
-            },
-            {
-              "scope": "support.function.builtin.solan",
-              "settings": {
-                "foreground": "#5fd7d7"
-              }
-            },
-            {
-              "scope": "entity.name.class.solan",
-              "settings": {
-                "foreground": "#ffd75f",
-                "fontStyle": "bold underline"
-              }
-            },
-            {
-              "scope": "entity.name.function.call.solan",
-              "settings": {
-                "foreground": "#ffd787"
-              }
-            },
-            {
-              "scope": "meta.embedded.solan",
-              "settings": {
-                "foreground": "#ffaf87"
-              }
-            },
-            {
-              "scope": "keyword.operator.solan",
-              "settings": {
-                "foreground": "#8a8a8a"
-              }
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "comment.line.solan",
+            "settings": {
+              "foreground": "#808080",
+              "fontStyle": "italic"
             }
-          ]
-        },
+          },
+          {
+            "scope": "comment.block.solan",
+            "settings": {
+              "foreground": "#808080",
+              "fontStyle": "italic"
+            }
+          },
+          {
+            "scope": "string.quoted.solan",
+            "settings": {
+              "foreground": "#87d787"
+            }
+          },
+          {
+            "scope": "constant.numeric.solan",
+            "settings": {
+              "foreground": "#ff875f"
+            }
+          },
+          {
+            "scope": "keyword.control.solan",
+            "settings": {
+              "foreground": "#af87ff",
+              "fontStyle": "bold"
+            }
+          },
+          {
+            "scope": "storage.type.solan",
+            "settings": {
+              "foreground": "#5fafff",
+              "fontStyle": "bold"
+            }
+          },
+          {
+            "scope": "constant.language.solan",
+            "settings": {
+              "foreground": "#ffaf5f"
+            }
+          },
+          {
+            "scope": "variable.language.solan",
+            "settings": {
+              "foreground": "#d7afff",
+              "fontStyle": "italic"
+            }
+          },
+          {
+            "scope": "keyword.operator.word.solan",
+            "settings": {
+              "foreground": "#d787d7"
+            }
+          },
+          {
+            "scope": "keyword.control.import.solan",
+            "settings": {
+              "foreground": "#af87af"
+            }
+          },
+          {
+            "scope": "support.class.module.solan",
+            "settings": {
+              "foreground": "#5fd7af",
+              "fontStyle": "bold"
+            }
+          },
+          {
+            "scope": "support.function.builtin.solan",
+            "settings": {
+              "foreground": "#5fd7d7"
+            }
+          },
+          {
+            "scope": "entity.name.class.solan",
+            "settings": {
+              "foreground": "#ffd75f",
+              "fontStyle": "bold underline"
+            }
+          },
+          {
+            "scope": "entity.name.function.call.solan",
+            "settings": {
+              "foreground": "#ffd787"
+            }
+          },
+          {
+            "scope": "meta.embedded.solan",
+            "settings": {
+              "foreground": "#ffaf87"
+            }
+          },
+          {
+            "scope": "keyword.operator.solan",
+            "settings": {
+              "foreground": "#89d7ff"
+            }
+          }
+        ]
+      },
+      "[solan]": {
         "editor.semanticHighlighting.enabled": false,
         "editor.wordBasedSuggestions": "off",
         "editor.bracketPairColorization.enabled": true,
         "editor.detectIndentation": false,
         "editor.tabSize": 2,
-        "editor.insertSpaces": true
+        "editor.insertSpaces": true,
+        "editor.occurrencesHighlight": "off"
       }
     },
+    "iconThemes": [
+      {
+        "id": "solan-icons",
+        "label": "سولان",
+        "path": "./fileicons/solan-icon-theme.json"
+      }
+    ],
     "configuration": {
       "title": "Solan",
       "properties": {
