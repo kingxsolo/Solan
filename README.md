@@ -39,19 +39,31 @@
 
 ### الإصدارات الجاهزة (بلا بناء — الأسهل)
 
-أنزّل ملفاً جاهزاً من صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest):
+اختر نسختك وانقر الزر — كل زر ينزّل **أحدث إصدار مباشرة** (روابط ثابتة لا تتغير مع الإصدارات الجديدة):
 
-| منصتك | الملف |
+| منصتك | أزرار التنزيل |
 |---|---|
-| ويندوز 64-بت | `Solan-*-Setup-x64.exe` — مُثبِّت بواجهة عربية (PATH + ربط ملفات `.سو` + إزالة تثبيت) |
-| ويندوز 64/32-بت | `Solan-*-windows-x64.zip` / `x86.zip` — محمول |
-| لينكس أي توزيعة | `Solan-*-linux-x64.tar.gz` — **ثابت بلا أي مكتبات** |
-| أوبونتو/ديبيان | `solan_*_amd64.deb` |
-| فيدورا/ريد هات | `solan-*.x86_64.rpm` |
-| ماك Intel + Apple Silicon | `Solan-*-macos.pkg` أو `Solan-*-macos-universal.tar.gz` |
-| ترمكس (أندرويد) | بناء من المصدر: `pkg install -y clang git` ثم `sh install.sh` |
+| 🪟 **ويندوز 64-بت** | [![Windows 64-bit installer](https://img.shields.io/badge/Windows_64--bit-Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x64.exe) [![Windows 64-bit portable zip](https://img.shields.io/badge/Windows_64--bit-Portable_ZIP-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x64.zip) |
+| 🪟 **ويندوز 32-بت** | [![Windows 32-bit portable zip](https://img.shields.io/badge/Windows_32--bit-Portable_ZIP-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x86.zip) |
+| 🍎 **ماك** (Intel + Apple Silicon) | [![macOS installer pkg](https://img.shields.io/badge/macOS-Installer_PKG-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos.pkg) [![macOS portable tar.gz](https://img.shields.io/badge/macOS-Portable_tar.gz-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos-universal.tar.gz) |
+| 🐧 **لينكس 64-بت** (أي توزيعة) | [![Debian package](https://img.shields.io/badge/Linux_64--bit-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_amd64.deb) [![RPM package](https://img.shields.io/badge/Linux_64--bit-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.x86_64.rpm) [![Linux portable tar.gz](https://img.shields.io/badge/Linux_64--bit-Portable_tar.gz-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-x64.tar.gz) |
+| 🐧 **لينكس ARM64** (راسبيري باي 5، خوادم ARM) | [![Linux ARM64 portable tar.gz](https://img.shields.io/badge/Linux_ARM64-Portable_tar.gz-2EA043?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-arm64.tar.gz) |
 
-**SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً.**
+المُثبِّت بواجهة عربية (PATH + ربط ملفات `.سو` + إزالة تثبيت)، وحزم لينكس **ثابتة بلا أي مكتبات**.
+
+**لينكس وماك بأمر واحد** — يكتشف نظامك ويثبّت:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-release.sh | sh
+```
+
+**ترمكس (أندرويد)** — بناء من المصدر داخل الترمكس (دقائق قليلة):
+
+```bash
+pkg install -y clang git && git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
+```
+
+كل الملفات أيضاً في صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest). **SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً.**
 
 ### ويندوز
 
@@ -2319,6 +2331,7 @@ sh install.sh --build-only
 
 | البند | التفصيل |
 |---|---|
+| **أزرار تنزيل مباشرة في التوثيق** | جدول أزرار إنجليزية (shields.io) في قسم التثبيت: ويندوز 64/32، ماك، لينكس 64/ARM64، deb/rpm — كل زر ينزّل أحدث إصدار مباشرة عبر روابط ثابتة بصيغة `releases/latest/download/`؛ سير الإصدار يرفع مع كل إصدار نسخاً بأسماء ثابتة بلا رقم إصدار لتبقى الروابط صالحة دائماً |
 | **إزالة إضافة VS Code من المشروع** | حُذف `editor/vscode/` وسكربت بناء الحزمة وتكامل المُثبِّت معها؛ دعم المحررات يبقى كاملاً عبر `solan lsp` القياسي لأي محرر يدعم LSP (القسم 12). إضافة VS Code ستُنشر لاحقاً كحزمة مستقلة تُبحث وتُثبَّت من سوق الإضافات |
 
 ### الإصدار 1.1.0

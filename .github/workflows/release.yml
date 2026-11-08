@@ -4,6 +4,7 @@
 #  - وسم v* : يبني المُثبِّتات الأصلية وينشر إصداراً بكل الملفات
 #  الحزم الناتجة: Setup.exe (ويندوز) + zip 64/32 + tar.gz لينكس ثابت
 #  + deb + rpm + pkg ماك + tar.gz ماك — كلها بلا أي متطلبات خارجية
+#  + نسخ بأسماء ثابتة (بلا رقم إصدار) لروابط التنزيل المباشرة في README
 # =====================================================================
 name: بناء-وإصدار
 
@@ -375,6 +376,24 @@ jobs:
           path: إصدار
           merge-multiple: true
 
+      # نسخ بأسماء بلا رقم إصدار: روابط releases/latest/download/ في README
+      # تنزّل دائماً أحدث إصدار دون تعديل الروابط
+      - name: أسماء ثابتة للروابط المباشرة
+        run: |
+          cd إصدار
+          # تسطيح: أرتيفكت ويندوز يحفظ المُثبِّت تحت dist/ — ننقله للجذر
+          if [ -d dist ]; then mv dist/* . && rmdir dist; fi
+          cp Solan-*-Setup-x64.exe          Solan-Setup-x64.exe
+          cp Solan-*-windows-x64.zip        Solan-windows-x64.zip
+          cp Solan-*-windows-x86.zip        Solan-windows-x86.zip
+          cp Solan-*-linux-x64.tar.gz       Solan-linux-x64.tar.gz
+          cp Solan-*-linux-arm64.tar.gz     Solan-linux-arm64.tar.gz
+          cp solan_*_amd64.deb              solan_amd64.deb
+          cp solan-*x86_64.rpm              solan.x86_64.rpm
+          cp Solan-*-macos.pkg              Solan-macos.pkg
+          cp Solan-*-macos-universal.tar.gz Solan-macos-universal.tar.gz
+          ls -1
+
       - name: ملاحظات الإصدار
         run: |
           cat > ملاحظات.md <<'EOF'
@@ -394,6 +413,9 @@ jobs:
 
           **من المصدر على أي منصة**: `sh install.sh` — يكتشف بيئتك ويبني ويثبّت.
           التفاصيل الكاملة في [README.md](README.md).
+
+          الملفات ذات الأسماء بلا رقم إصدار (مثل `Solan-windows-x64.zip`) نسخ ثابتة
+          تُرفع مع كل إصدار — روابط `releases/latest/download/` تنزّل دائماً الأحدث.
 
           - ويندوز 64-بت ولينكس 64-بت ولينكس ARM64 وماك (Intel وApple Silicon): **JIT مفعّل** (حلقات أسرع بعدة مرات)
           - ويندوز 32-بت: مفسَّر كامل الوظائف
