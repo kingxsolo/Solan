@@ -183,12 +183,7 @@ if ($LASTEXITCODE -ne 0) { throw "الملف التنفيذي لا يعمل" }
 & $exe pc\هلا.سو
 if ($LASTEXITCODE -ne 0) { throw "فشل تنفيذ برنامج تجريبي" }
 
-# ---------- 5) حزمة إضافة VS Code (.vsix) ----------
-Write-Host "▸ بناء حزمة إضافة VS Code (.vsix)..." -ForegroundColor Cyan
-powershell -NoProfile -ExecutionPolicy Bypass -File "pc\build-vsix.ps1"
-if ($LASTEXITCODE -ne 0) { throw "فشل بناء حزمة .vsix" }
-
-# ---------- 6) المُثبِّت ----------
+# ---------- 5) المُثبِّت ----------
 if ($Installer) {
   if ($Arch32) { Write-Host "✗ المُثبِّت غير متاح للبناء 32-بت حالياً — الناتج dist\solan32.exe جاهز للنسخ اليدوي" -ForegroundColor Yellow }
   else {

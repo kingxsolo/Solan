@@ -3,7 +3,6 @@
 #  الاستخدام: powershell -ExecutionPolicy Bypass -File assets\make-icons.ps1
 #  النواتج:
 #    assets\solan-logo.png        الشعار بخلفية شفافة (512×512)
-#    editor\vscode\icon.png       أيقونة إضافة VS Code (256×256)
 #    pc\solan.ico                 أيقونة ويندوز متعددة الأحجام (256/64/48/32/16)
 # =====================================================================
 $ErrorActionPreference = "Stop"
@@ -83,29 +82,7 @@ $out.UnlockBits($bd)
 $logoPath = Join-Path $root "assets\solan-logo.png"
 $out.Save($logoPath, [System.Drawing.Imaging.ImageFormat]::Png)
 
-# ---------- 5) أيقونة إضافة VS Code (256×256) ----------
-$vs = New-Object System.Drawing.Bitmap 256, 256
-$g = [System.Drawing.Graphics]::FromImage($vs)
-$g.InterpolationMode = 'HighQualityBicubic'
-$g.SmoothingMode = 'HighQuality'
-$g.PixelOffsetMode = 'HighQuality'
-$g.DrawImage($out, 0, 0, 256, 256)
-$g.Dispose()
-$vs.Save((Join-Path $root "editor\vscode\icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-$vs.Dispose()
-
-# ---------- 5ب) أيقونة ملفات اللغة في VS Code (64×64 بهامش صغير) ----------
-$fi = New-Object System.Drawing.Bitmap 64, 64
-$g = [System.Drawing.Graphics]::FromImage($fi)
-$g.InterpolationMode = 'HighQualityBicubic'
-$g.SmoothingMode = 'HighQuality'
-$g.PixelOffsetMode = 'HighQuality'
-$g.DrawImage($out, 4, 4, 56, 56)
-$g.Dispose()
-$fi.Save((Join-Path $root "editor\vscode\file-icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-$fi.Dispose()
-
-# ---------- 6) أيقونة ويندوز متعددة الأحجام (.ico) ----------
+# ---------- 5) أيقونة ويندوز متعددة الأحجام (.ico) ----------
 $sizes = @(256, 64, 48, 32, 16)
 $pngs = @()
 foreach ($s in $sizes) {
@@ -139,6 +116,4 @@ $bw.Dispose(); $ms2.Dispose()
 $out.Dispose()
 
 Write-Host "✓ assets\solan-logo.png (شفاف)"
-Write-Host "✓ editor\vscode\icon.png"
-Write-Host "✓ editor\vscode\file-icon.png"
 Write-Host "✓ pc\solan.ico"
