@@ -6,6 +6,8 @@
       "*/"
     ]
   },
+  "wordPattern": "[\\u0600-\\u06FF\\w_]+",
+  "autoCloseBefore": " \t(){}[];,،؛.:'\"`=",
   "brackets": [
     [
       "{",

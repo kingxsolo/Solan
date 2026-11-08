@@ -65,7 +65,9 @@ $manifest = @"
 $files = @(
   "package.json",
   "extension.js",
+  "data.js",
   "icon.png",
+  "file-icon.png",
   "language-configuration.json",
   "syntaxes/solan.tmLanguage.json",
   "snippets/solan.json"

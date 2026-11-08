@@ -94,6 +94,17 @@ $g.Dispose()
 $vs.Save((Join-Path $root "editor\vscode\icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 $vs.Dispose()
 
+# ---------- 5ب) أيقونة ملفات اللغة في VS Code (64×64 بهامش صغير) ----------
+$fi = New-Object System.Drawing.Bitmap 64, 64
+$g = [System.Drawing.Graphics]::FromImage($fi)
+$g.InterpolationMode = 'HighQualityBicubic'
+$g.SmoothingMode = 'HighQuality'
+$g.PixelOffsetMode = 'HighQuality'
+$g.DrawImage($out, 4, 4, 56, 56)
+$g.Dispose()
+$fi.Save((Join-Path $root "editor\vscode\file-icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+$fi.Dispose()
+
 # ---------- 6) أيقونة ويندوز متعددة الأحجام (.ico) ----------
 $sizes = @(256, 64, 48, 32, 16)
 $pngs = @()
@@ -129,4 +140,5 @@ $out.Dispose()
 
 Write-Host "✓ assets\solan-logo.png (شفاف)"
 Write-Host "✓ editor\vscode\icon.png"
+Write-Host "✓ editor\vscode\file-icon.png"
 Write-Host "✓ pc\solan.ico"

@@ -1,8 +1,13 @@
 // إضافة سولان لـ VS Code — عميل خادم لغة مصغّر بلا تبعيات خارجية
 // يتصل بـ `solan lsp` عبر stdin/stdout بإطار JSON-RPC القياسي
+// + مزوّد إكمال ذكي: يقترح الدوال والكلمات مرتبة حسب الأكثر استخداماً
+//   (استخدامك الفعلي المحفوظ + تكرار الكلمة في الملف + شعبية مبدئية)
 "use strict";
 const vscode = require("vscode");
 const { spawn } = require("child_process");
+const data = require("./data");
+
+// ==================== عميل خادم اللغة (تشخيص) ====================
 
 let proc = null;
 let outChan = null;
@@ -137,10 +142,6 @@ function stop() {
 // ربط تفعيل إغلاق/تفتح الملفات والتعديلات بمزامنة الخادم
 const listeners = [];
 
-function uriOf(doc) {
-  return doc.isUntitled ? null : doc.uri;
-}
-
 function onOpen(doc) {
   if (doc.languageId !== "solan") return;
   start();
@@ -179,7 +180,272 @@ function restart() {
   restarting = false;
 }
 
+// ==================== الإكمال الذكي ====================
+
+// عدد مرات قبولك لكل اقتراح — محفوظ عبر الجلسات (globalState)
+let usage = {};
+let globalCtx = null;
+
+function bumpUsage(name) {
+  if (!name) return;
+  usage[name] = (usage[name] || 0) + 1;
+  if (globalCtx) globalCtx.globalState.update("solan.usage", usage);
+}
+
+// تكرار كل كلمة في الملف الحالي (ذاكرة مؤقتة بحسب نسخة المستند)
+let freqDoc = null, freqVer = -1, freqMap = null;
+function docFreqs(doc) {
+  if (freqDoc === doc && freqVer === doc.version && freqMap) return freqMap;
+  const text = doc.getText();
+  const map = new Map();
+  const re = /[\u0600-\u06FF\w_]+/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const w = m[0];
+    map.set(w, (map.get(w) || 0) + 1);
+  }
+  freqDoc = doc; freqVer = doc.version; freqMap = map;
+  return map;
+}
+
+// سياق الإكمال عند المؤشر: نطاق الكلمة، هل نحن بعد نقطة، واسم الكائن قبلها
+function completionContext(doc, pos) {
+  const line = doc.lineAt(pos.line).text;
+  const isWord = ch => /[\u0600-\u06FF\w_]/.test(ch);
+  const end = Math.min(pos.character, line.length);
+  let b = end;
+  while (b < line.length && isWord(line[b])) b++;
+  let a = end;
+  while (a > 0 && isWord(line[a - 1])) a--;
+  const word = line.slice(a, end);
+  // هل يسبق الكلمة نقطة (مع تجاهل الفراغات)؟ ومن هو قبل النقطة؟
+  let i = a - 1;
+  while (i >= 0 && line[i] === " ") i--;
+  const afterDot = i >= 0 && line[i] === ".";
+  let owner = "";
+  if (afterDot) {
+    let e2 = i;
+    let s2 = i;
+    while (s2 > 0 && isWord(line[s2 - 1])) s2--;
+    owner = line.slice(s2, e2);
+  }
+  return {
+    range: word ? new vscode.Range(pos.line, a, pos.line, end) : null,
+    prefix: word,
+    afterDot,
+    owner
+  };
+}
+
+// هل الحرف التالي للكلمة قوس فتح؟ (نتجنب إدخال قوس مكرر)
+function nextIsOpenParen(doc, ctx) {
+  const line = doc.lineAt(ctx.range ? ctx.range.end.line : 0).text;
+  let i = ctx.range ? ctx.range.end.character : Math.min(ctx.cursor, line.length);
+  while (i < line.length && line[i] === " ") i++;
+  return line[i] === "(";
+}
+
+function md(s) { return new vscode.MarkdownString(s); }
+
+// عنصر إكمال جاهز مع الترتيب والتوثيق
+function makeItem(o, ctx, freqs) {
+  // o: {label, kind, detail, doc, insert, pop, filter, isFn}
+  const item = new vscode.CompletionItem(o.label, o.kind);
+  item.detail = o.detail || "";
+  if (o.doc) item.documentation = md(o.doc);
+  item.insertText = o.insert;
+  if (o.isFn) item.insertTextRules = vscode.CompletionItemInsertTextRule.InsertAsSnippet;
+  if (o.filter && o.filter !== o.label) item.filterText = o.filter;
+  if (ctx.range) item.range = ctx.range;
+  // الترتيب: الأكثر استخداماً أولاً (score أكبر = sortText أصغر)
+  const score = (o.pop || 0) + (usage[o.label] || 0) * 12 + (freqs.get(o.label) || 0) * 6;
+  item.sortText = String(999999 - score).padStart(6, "0");
+  // تسجيل الاستخدام عند القبول ليتحسن الترتيب مع الوقت
+  item.command = { command: "solan.completionAccepted", title: "تسجيل الاستخدام", arguments: [o.label] };
+  return item;
+}
+
+// أدخل الاسم مع القوسين ومؤشر داخلها، إلا إذا كتب المستخدم "(" قبله
+function fnInsert(name, doc, ctx) {
+  return nextIsOpenParen(doc, ctx) ? name : name + "($0)";
+}
+
+function provideItems(doc, pos) {
+  const ctx = completionContext(doc, pos);
+  ctx.cursor = pos.character;
+  const freqs = docFreqs(doc);
+  const items = [];
+  const F = n => freqs.get(n) || 0;
+
+  // ---- بعد نقطة: طرق القيم ----
+  if (ctx.afterDot) {
+    for (const m of data.METHODS) {
+      const isFn = !m.prop;
+      items.push(makeItem({
+        label: m.n,
+        kind: isFn ? vscode.CompletionItemKind.Method : vscode.CompletionItemKind.Property,
+        detail: m.prop ? "خاصية مدمجة" : "طريقة مدمجة — " + (m.s || m.n + "()"),
+        doc: m.d ? "**" + (m.s || m.n) + "**\n\n" + m.d : undefined,
+        insert: isFn ? fnInsert(m.n, doc, ctx) : m.n,
+        isFn: isFn && !nextIsOpenParen(doc, ctx),
+        pop: m.p || 20
+      }, ctx, freqs));
+    }
+    return items;
+  }
+
+  // ---- دوال ومتغيرات المستخدم المعرفة في الملف ----
+  const text = doc.getText();
+  const defs = [];
+  const reFn = /^[ \t]*(?:غير_متزامن[ \t]+|ساكن[ \t]+|مولد[ \t]+)?دالة[ \t]+([^\s({]+)/gm;
+  const reVar = /^[ \t]*خل[ \t]+([^\s=:，(]+)/gm;
+  const reConst = /^[ \t]*ثابت[ \t]+([^\s=:]+)/gm;
+  const reClass = /^[ \t]*صنف[ \t]+([^\s{]+)/gm;
+  let mm;
+  while ((mm = reFn.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Function, d: "دالة معرفة في هذا الملف" });
+  while ((mm = reVar.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Variable, d: "متغير معرف في هذا الملف" });
+  while ((mm = reConst.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Constant, d: "ثابت معرف في هذا الملف" });
+  while ((mm = reClass.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Class, d: "صنف معرف في هذا الملف" });
+  const seen = new Set();
+  for (const def of defs) {
+    if (seen.has(def.n)) continue;
+    seen.add(def.n);
+    const isFnDef = def.k === vscode.CompletionItemKind.Function;
+    items.push(makeItem({
+      label: def.n, kind: def.k, detail: def.d,
+      insert: isFnDef ? fnInsert(def.n, doc, ctx) : def.n,
+      isFn: isFnDef && !nextIsOpenParen(doc, ctx),
+      pop: 120 // تعريفات المستخدم أولاً دائماً
+    }, ctx, freqs));
+  }
+
+  // ---- الدوال المدمجة والوحدات العامة ----
+  for (const f of data.BUILTINS) {
+    const isMod = !f.s; // مدخلات الوحدات (نظام، جيسون...) بلا توقيع
+    items.push(makeItem({
+      label: f.n,
+      kind: isMod ? vscode.CompletionItemKind.Module : vscode.CompletionItemKind.Function,
+      detail: isMod ? "وحدة أصلية" : "دالة مدمجة — " + f.s,
+      doc: f.d ? "**" + (f.s || f.n) + "**\n\n" + f.d : undefined,
+      insert: isMod ? f.n : fnInsert(f.n, doc, ctx),
+      isFn: !isMod && !nextIsOpenParen(doc, ctx),
+      pop: f.p || 15,
+      filter: data.norm(f.n) !== f.n ? f.n + " " + data.norm(f.n) : undefined
+    }, ctx, freqs));
+  }
+
+  // ---- الوحدات (أصلية + قياسية) ----
+  for (const mod of [...data.NATIVE_MODULES, ...data.STDLIB_MODULES]) {
+    items.push(makeItem({
+      label: mod, kind: vscode.CompletionItemKind.Module,
+      detail: "مكتبة — استورد \"مكتبة\"",
+      insert: mod, pop: 25,
+      filter: data.norm(mod) !== mod ? mod + " " + data.norm(mod) : undefined
+    }, ctx, freqs));
+  }
+
+  // ---- الكلمات المفتاحية القياسية ثم البدائل ----
+  for (const k of data.KEYWORDS) {
+    items.push(makeItem({
+      label: k, kind: vscode.CompletionItemKind.Keyword,
+      detail: "كلمة مفتاحية", insert: k, pop: 55,
+      filter: data.norm(k) !== k ? k + " " + data.norm(k) : undefined
+    }, ctx, freqs));
+  }
+  for (const a of data.ALIASES) {
+    items.push(makeItem({
+      label: a, kind: vscode.CompletionItemKind.Keyword,
+      detail: "كلمة مفتاحية (صيغة بديلة)", insert: a, pop: 12,
+      filter: data.norm(a) !== a ? a + " " + data.norm(a) : undefined
+    }, ctx, freqs));
+  }
+
+  return items;
+}
+
+const completionProvider = {
+  async provideCompletionItems(doc, pos) {
+    const local = provideItems(doc, pos);
+    // بعد النقطة: اسأل خادم اللغة عن أعضاء الوحدة (نظام.، ملفات.…) إن كان يعمل
+    const ctx = completionContext(doc, pos);
+    if (ctx.afterDot && proc) {
+      try {
+        const res = await Promise.race([
+          request("textDocument/completion", {
+            textDocument: { uri: doc.uri.toString() },
+            position: { line: pos.line, character: pos.character }
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("مهلة")), 400))
+        ]);
+        const raw = (res && res.items) || res || [];
+        const have = new Set(local.map(i => i.label));
+        const map = { 2: 1, 3: 2, 5: 6, 6: 5, 7: 6, 9: 8, 12: 2, 13: 5, 14: 13 };
+        for (const it of raw) {
+          if (!it || !it.label || have.has(it.label)) continue;
+          have.add(it.label);
+          const ci = new vscode.CompletionItem(it.label, map[it.kind] || vscode.CompletionItemKind.Function);
+          ci.detail = it.detail || "عضو في مكتبة " + ctx.owner;
+          ci.insertText = it.label;
+          if (ctx.range) ci.range = ctx.range;
+          ci.sortText = String(999999 - (60 + (usage[it.label] || 0) * 12)).padStart(6, "0");
+          ci.command = { command: "solan.completionAccepted", title: "تسجيل الاستخدام", arguments: [it.label] };
+          local.push(ci);
+        }
+      } catch (e) { /* الخادم غير متاح — يكفي الإكمال المحلي */ }
+    }
+    return local;
+  }
+};
+
+// حروف التفعيل: كل الحروف العربية واللاتينية والنقطة (اقتراحات أثناء الكتابة)
+const TRIGGERS = "ابتثجحخدذرزسشصضطظعغفقكلمنهويةءآأإئؤةى_".split("")
+  .concat("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".split(""))
+  .concat(["."]);
+
+// ==================== التحويم (hover) ====================
+
+const hoverProvider = {
+  provideHover(doc, pos) {
+    const ctx = completionContext(doc, pos);
+    if (!ctx.range) return null;
+    const word = ctx.prefix;
+    const n = data.norm(word);
+    const f = data.BUILTINS.find(x => x.n === word || data.norm(x.n) === n);
+    if (f) {
+      const parts = ["**" + (f.s || f.n) + "**"];
+      if (f.d) parts.push(f.d);
+      parts.push("_" + (f.s ? "دالة مدمجة في سولان" : "وحدة أصلية في سولان") + "_");
+      return new vscode.Hover(md(parts.join("\n\n")), ctx.range);
+    }
+    const m = data.METHODS.find(x => x.n === word || data.norm(x.n) === n);
+    if (m) {
+      const parts = ["**" + (m.s || m.n) + "**"];
+      if (m.d) parts.push(m.d);
+      parts.push("_" + (m.prop ? "خاصية مدمجة للقيم" : "طريقة مدمجة للقيم") + "_");
+      return new vscode.Hover(md(parts.join("\n\n")), ctx.range);
+    }
+    if (data.KEYWORDS.includes(word) || data.ALIASES.includes(word)) {
+      return new vscode.Hover(md("**" + word + "**\n\nكلمة مفتاحية في سولان"), ctx.range);
+    }
+    return null;
+  }
+};
+
+// ==================== التفعيل ====================
+
 exports.activate = function (ctx) {
+  globalCtx = ctx;
+  usage = ctx.globalState.get("solan.usage", {}) || {};
+
+  // أمر داخلي: يُستدعى عند قبول اقتراح ليزيد ترتيبه مستقبلاً
+  ctx.subscriptions.push(vscode.commands.registerCommand("solan.completionAccepted", bumpUsage));
+
+  ctx.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: "solan" }, completionProvider, ...TRIGGERS),
+    vscode.languages.registerHoverProvider({ language: "solan" }, hoverProvider)
+  );
+
   listeners.push(
     vscode.workspace.onDidOpenTextDocument(onOpen),
     vscode.workspace.onDidChangeTextDocument(onDocsChanged),
