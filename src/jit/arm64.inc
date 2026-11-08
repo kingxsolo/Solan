@@ -313,7 +313,7 @@ static void jx_sse_rr(XB *x, int pfx, int op, int dst, int src) {
     case 0x0F5C: base = 0x1E603800u; break;
     case 0x0F59: base = 0x1E600800u; break;
     case 0x0F5E: base = 0x1E601800u; break;
-    case 0x0F2E: case 0x0F2F: base = 0x1E602000u; jx_fpcc = 1; break;
+    case 0x0F2E: case 0x0F2F: jx_emit(x, 0x1E602000u | ((uint32_t)src << 16) | ((uint32_t)dst << 5)); jx_fpcc = 1; return;
     default: jx_movaps(x, dst, src); return;
   }
   jx_emit(x, base | ((uint32_t)src << 16) | ((uint32_t)dst << 5) | (uint32_t)dst);

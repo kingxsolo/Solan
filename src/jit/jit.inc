@@ -452,8 +452,9 @@ static void jc_rip(JC *c, int pfx, int op, int reg, int lab) {
 #if JX_ARM
 
   if (op == 0x0F10) jx_emit(x, 0x5C000000u | (uint32_t)reg);
-  else { jx_emit(x, 0x5C000000u | 16u); jx_sse_rr(x, pfx, op, reg, 16); }
+  else jx_emit(x, 0x5C000000u | 16u);
   jc_fixup(c, lab);
+  if (op != 0x0F10) jx_sse_rr(x, pfx, op, reg, 16);
 #else
   if (pfx) xb_b(x, pfx);
   jx_rex(x, 0, reg, 0, 0); jx_opc(x, op); xb_b(x, ((reg & 7) << 3) | 5); jc_fixup(c, lab);
