@@ -7,7 +7,7 @@
 #define SolanVersion "1.2.0"
 #endif
 ; إصدار حزمة إضافة VS Code (مستقل عن إصدار اللغة)
-#define VsixVersion "1.2.1"
+#define VsixVersion "1.2.2"
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"
 

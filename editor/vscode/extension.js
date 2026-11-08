@@ -208,6 +208,84 @@ function docFreqs(doc) {
   return map;
 }
 
+// ---------- جمع التعريفات من نص (متغيرات، دوال، معاملات، ثوابت، أصناف) ----------
+function collectDefs(text, topLevelOnly) {
+  const out = [];
+  const seen = new Set();
+  const add = (n, k, d) => {
+    n = (n || "").trim();
+    if (!n || seen.has(n)) return;
+    if (!/^[\u0600-\u06FF\w_]+$/.test(n)) return;
+    seen.add(n);
+    out.push({ n, k, d });
+  };
+  const scan = (re, fn) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      // m[2] = الإزاحة البادئة — في المسح الشامل نقبل المستوى الأعلى فقط
+      if (topLevelOnly && m[2] && m[2].length) continue;
+      fn(m);
+    }
+  };
+  const K = vscode.CompletionItemKind;
+  // دالة مع معاملاتها
+  scan(/(^|\n)([ \t]*)(?:غير_متزامن[ \t]+|ساكن[ \t]+|مولد[ \t]+)?دالة[ \t]+([^\s({]+)[ \t]*\(([^)]*)\)/g,
+    m => {
+      add(m[3], K.Function, "دالة");
+      for (let p of m[4].split(/[،,]/)) {
+        p = p.trim().split(/[:\s]/)[0];
+        add(p, K.Variable, "معامل دالة");
+      }
+    });
+  // متغيرات وثوابت
+  scan(/(^|\n)([ \t]*)خل[ \t]+([^\s=:，(]+)/g, m => add(m[3], K.Variable, "متغير"));
+  scan(/(^|\n)([ \t]*)ثابت[ \t]+([^\s=:]+)/g, m => add(m[3], K.Constant, "ثابت"));
+  // أصناف
+  scan(/(^|\n)([ \t]*)صنف[ \t]+([^\s{]+)/g, m => add(m[3], K.Class, "صنف"));
+  // متغيرات حلقة لكل
+  scan(/(^|\n)([ \t]*)لكل[ \t]+([^\s]+)[ \t]+في/gm, m => add(m[3], K.Variable, "متغير حلقة"));
+  // متغيرات امسك (الخطأ)
+  scan(/(^|\n)([ \t]*)\}[ \t]*امسك[ \t]*\(\s*([^)\s]+)\s*\)/g, m => add(m[3], K.Variable, "متغير الخطأ"));
+  return out;
+}
+
+// ---------- تعريفات المشروع كله (مسح كسول مخزن) ----------
+let wsDefs = [];        // [{n, k, file}]
+let wsScanned = false;
+let wsScanTimer = null;
+
+function scheduleWsScan() {
+  if (wsScanTimer) return;
+  wsScanTimer = setTimeout(() => { wsScanTimer = null; scanWorkspace(); }, 800);
+}
+
+async function scanWorkspace() {
+  try {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || !folders.length) { wsDefs = []; wsScanned = true; return; }
+    const found = new Map();
+    for (const p of ["**/*.سو", "**/*.an", "**/*.solan"]) {
+      try {
+        for (const u of await vscode.workspace.findFiles(p, "**/{node_modules,.git,dist,release}/**", 200))
+          found.set(u.toString(), u);
+      } catch (e) {}
+    }
+    const defs = new Map();
+    for (const u of found.values()) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(u);
+        const text = Buffer.from(bytes).toString("utf8");
+        for (const d of collectDefs(text, true)) {
+          if (!defs.has(d.n)) defs.set(d.n, { n: d.n, k: d.k, file: u.path.split("/").pop() });
+        }
+      } catch (e) { /* ملف غير قابل للقراءة — تجاوز */ }
+    }
+    wsDefs = [...defs.values()];
+    wsScanned = true;
+  } catch (e) { wsScanned = true; }
+}
+
 // سياق الإكمال عند المؤشر: نطاق الكلمة، هل نحن بعد نقطة، واسم الكائن قبلها
 function completionContext(doc, pos) {
   const line = doc.lineAt(pos.line).text;
@@ -294,28 +372,33 @@ function provideItems(doc, pos) {
     return items;
   }
 
-  // ---- دوال ومتغيرات المستخدم المعرفة في الملف ----
+  // ---- تعريفات المستخدم: هذا الملف (كل المستويات) ثم بقية المشروع ----
   const text = doc.getText();
-  const defs = [];
-  const reFn = /^[ \t]*(?:غير_متزامن[ \t]+|ساكن[ \t]+|مولد[ \t]+)?دالة[ \t]+([^\s({]+)/gm;
-  const reVar = /^[ \t]*خل[ \t]+([^\s=:，(]+)/gm;
-  const reConst = /^[ \t]*ثابت[ \t]+([^\s=:]+)/gm;
-  const reClass = /^[ \t]*صنف[ \t]+([^\s{]+)/gm;
-  let mm;
-  while ((mm = reFn.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Function, d: "دالة معرفة في هذا الملف" });
-  while ((mm = reVar.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Variable, d: "متغير معرف في هذا الملف" });
-  while ((mm = reConst.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Constant, d: "ثابت معرف في هذا الملف" });
-  while ((mm = reClass.exec(text)) !== null) defs.push({ n: mm[1], k: vscode.CompletionItemKind.Class, d: "صنف معرف في هذا الملف" });
+  const defs = collectDefs(text, false);
   const seen = new Set();
   for (const def of defs) {
-    if (seen.has(def.n)) continue;
     seen.add(def.n);
     const isFnDef = def.k === vscode.CompletionItemKind.Function;
     items.push(makeItem({
-      label: def.n, kind: def.k, detail: def.d,
+      label: def.n, kind: def.k,
+      detail: def.d + " — في هذا الملف",
       insert: isFnDef ? fnInsert(def.n, doc, ctx) : def.n,
       isFn: isFnDef && !nextIsOpenParen(doc, ctx),
       pop: 120 // تعريفات المستخدم أولاً دائماً
+    }, ctx, freqs));
+  }
+  // تعريفات المستوى الأعلى من بقية ملفات سولان في المشروع
+  if (!wsScanned) scheduleWsScan();
+  for (const d of wsDefs) {
+    if (seen.has(d.n)) continue;
+    seen.add(d.n);
+    const isFnDef = d.k === vscode.CompletionItemKind.Function;
+    items.push(makeItem({
+      label: d.n, kind: d.k,
+      detail: d.d + " — معرف في " + d.file,
+      insert: isFnDef ? fnInsert(d.n, doc, ctx) : d.n,
+      isFn: isFnDef && !nextIsOpenParen(doc, ctx),
+      pop: 70
     }, ctx, freqs));
   }
 
@@ -450,6 +533,8 @@ exports.activate = function (ctx) {
     vscode.workspace.onDidOpenTextDocument(onOpen),
     vscode.workspace.onDidChangeTextDocument(onDocsChanged),
     vscode.workspace.onDidCloseTextDocument(onClose),
+    vscode.workspace.onDidSaveTextDocument(() => scheduleWsScan()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => { wsScanned = false; scheduleWsScan(); }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration("solan.path")) restart();
     })
@@ -458,6 +543,8 @@ exports.activate = function (ctx) {
   if (outChan) ctx.subscriptions.push(outChan);
   // افتح أي ملفات سولان مفتوحة مسبقاً
   for (const doc of vscode.workspace.textDocuments) onOpen(doc);
+  // امسح تعريفات المشروع عند التفعيل
+  scanWorkspace();
 };
 
 exports.deactivate = function () {
