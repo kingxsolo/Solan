@@ -2,7 +2,7 @@
   "name": "solan-lang",
   "displayName": "Solan — سولان",
   "description": "دعم لغة سولان العربية: تلوين وأيقونة ملفات وإكمال ذكي حسب الأكثر استخداماً وقصاصات وخادم لغة مدمج بلا تبعيات",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "solan",
   "icon": "icon.png",
   "engines": {

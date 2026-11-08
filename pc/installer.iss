@@ -6,6 +6,8 @@
 #ifndef SolanVersion
 #define SolanVersion "1.2.0"
 #endif
+; إصدار حزمة إضافة VS Code (مستقل عن إصدار اللغة)
+#define VsixVersion "1.2.1"
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"
 
@@ -61,7 +63,7 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 ; إضافة VS Code — ملفات المصدر احتياطاً إلى {app}، والتثبيت الفعلي عبر .vsix في [Code]
 ; حزمة .vsix تُنسخ دائماً مع المهمة (حتى بلا VS Code) لتثبيتها يدوياً لاحقاً
 Source: "..\editor\vscode\*"; DestDir: "{app}\editor\vscode"; Flags: ignoreversion recursesubdirs; Tasks: vscode; Check: VscAvailable
-Source: "..\dist\Solan-{#SolanVersion}.vsix"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vscode
+Source: "..\dist\Solan-{#VsixVersion}.vsix"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vscode
 
 [Icons]
 Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
@@ -206,7 +208,7 @@ begin
     Exit;
   end;
   // مجلد إضافات VS Code الحقيقي: %USERPROFILE%\.vscode\extensions
-  Result := GetEnv('USERPROFILE') + '\.vscode\extensions\solan.solan-lang-{#SolanVersion}';
+  Result := GetEnv('USERPROFILE') + '\.vscode\extensions\solan.solan-lang-{#VsixVersion}';
   VscExtDirCached := Result;
 end;
 
@@ -257,7 +259,7 @@ var
   resultCode: integer;
 begin
   extDir := GetVscExtDir('');
-  vsix := ExpandConstant('{app}\Solan-{#SolanVersion}.vsix');
+  vsix := ExpandConstant('{app}\Solan-{#VsixVersion}.vsix');
   codeCmd := FindCodeCli;
   if (Length(codeCmd) > 0) and FileExists(vsix) then begin
     // علامتا اقتباس خارجيتان: قاعدة cmd /c تزيل الأولى والأخيرة من 4 اقتباسات
