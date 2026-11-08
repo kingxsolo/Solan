@@ -55,7 +55,7 @@ static void b64_enc_ex(const uint8_t *d, size_t n, Buf *o, bool url) {
   for (size_t i = 0; i < n; i += 3) {
     uint32_t v = d[i] << 16 | (i + 1 < n ? d[i + 1] << 8 : 0) | (i + 2 < n ? d[i + 2] : 0);
     buf_addc(o, A[(v >> 18) & 63]); buf_addc(o, A[(v >> 12) & 63]);
-    if (url) { /* آمن للروابط: بلا حشو '=' */
+    if (url) {
       if (i + 1 < n) buf_addc(o, A[(v >> 6) & 63]);
       if (i + 2 < n) buf_addc(o, A[v & 63]);
     } else {

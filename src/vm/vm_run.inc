@@ -31,7 +31,7 @@ static int run(int base) {
   CASE(OP_SET_LOCAL) frame->slots[READ8()] = PK(0); NEXT();
 
   CASE(OP_Q_SETPOP) { frame->slots[ip[0]] = sp[-1]; sp--; ip += 2; NEXT(); }
-  /* OP_JMOVE تُنشأ داخل JIT المناطق فقط (انهيار إطار مُدرج) ولا تظهر في البايت-كود أبداً */
+
   CASE(OP_JMOVE) RT("تعليمة JMOVE الداخلية لا تُنفذ في المفسّر");
   CASE(OP_Q_LL) { PUSHL(frame->slots[ip[0]]); PUSHL(frame->slots[ip[2]]); ip += 3; NEXT(); }
   CASE(OP_Q_LP) {
@@ -250,7 +250,7 @@ static int run(int base) {
           JitCtx cx; cx.slots = frame->slots; cx.sp = sp; cx.clo = frame->clo; cx.ip = ip - off; cx.code = 0;
           jr->fn(&cx);
           if (cx.code != 0 && ++jr->deopts > JIT_MAX_DEOPT) *cnt = JIT_OFF;
-          if (cx.code == 2) goto throw_exc; /* استثناء من call-out: vm.exc مضبوط والآلة تحت sp — لا استخدام لـ sp/ip */
+          if (cx.code == 2) goto throw_exc;
           sp = cx.sp; ip = (uint8_t *)cx.ip;
           NEXT();
         }
@@ -392,24 +392,24 @@ static int run(int base) {
     }
     NEXT();
   }
-  CASE(OP_RFOREP) { /* تهيئة حلقة المدى: flag=1: [base]=أ [base+1]=ب→العدد [base+2]=العدّاد — flag=0: [base]=العدد [base+1]=العدّاد */
+  CASE(OP_RFOREP) {
     uint8_t base = READ8(), flag = READ8(), nv = READ8();
     Value *s = frame->slots + base;
     if (!IS_NUM(s[0]) || !IS_NUM(s[1])) RT("مدى: الحدود يجب أن تكون أرقاما");
     double n = flag ? ceil(s[1].as.n - s[0].as.n) : s[0].as.n;
-    if (!(n > 0)) n = 0; /* NaN والسالب والصفر → حلقة فارغة؛ inf يبقى حلقة لا نهائية (كالمسار القديم) */
+    if (!(n > 0)) n = 0;
     if (flag) s[1] = NUMV(n); else s[0] = NUMV(n);
     (void)nv; NEXT();
   }
-  CASE(OP_RFOR) { /* تكرار المدى: العدّاد i من 0 حتى العدد؛ القيمة = أ + i (flag=1) أو i (flag=0) */
+  CASE(OP_RFOR) {
     uint8_t base = READ8(), flag = READ8(), nv = READ8(); uint16_t off = READ16();
     Value *s = frame->slots + base;
     double i = s[flag ? 2 : 1].as.n, n = s[flag ? 1 : 0].as.n;
     if (!(i < n)) { ip += off; NEXT(); }
-    if (flag) s[2].as.n = i + 1; else s[1].as.n = i + 1; /* العدّاد فقط: وسمه V_NUM ثابت */
+    if (flag) s[2].as.n = i + 1; else s[1].as.n = i + 1;
     double v = flag ? s[0].as.n + i : i;
-    if (nv == 2) PUSHL(NUMV(i)); /* ي = الفهرس */
-    PUSHL(NUMV(v)); /* ت/ي = القيمة */
+    if (nv == 2) PUSHL(NUMV(i));
+    PUSHL(NUMV(v));
     NEXT();
   }
   CASE(OP_TRY) {

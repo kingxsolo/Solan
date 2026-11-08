@@ -3,9 +3,9 @@
 #define FJ_MAXD 40
 #define FJ_MAXI 1500
 #if JX_ARM
-#define FJ_MAXARGS 8 /* ARM64 SysV: d0-d7 — ثمانية سجلات عشرية للوسائط */
+#define FJ_MAXARGS 8
 #elif JX_WIN
-#define FJ_MAXARGS 4 /* ويندوز x64: الوسائط العشرية الأربعة الأولى فقط في سجلات XMM */
+#define FJ_MAXARGS 4
 #else
 #define FJ_MAXARGS 6
 #endif
@@ -14,12 +14,12 @@
 enum { FJT_NONE = 0, FJT_NUM = 1, FJT_BOOL = 2, FJT_FN = 3 };
 
 typedef struct FjGuard { Dict *d; int gi; Str *name; Fun *fun; } FjGuard;
-typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; int rt; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int fs; } FjInfo; /* rt: نوع الإرجاع الموحد FJT_NUM/FJT_BOOL */
+typedef struct FjInfo { void *mem; size_t msz; void *entry; int ng; int rt; FjGuard g[FJ_MAXDEPS]; int nd; Fun *deps[FJ_MAXDEPS]; int bails; int fs; } FjInfo;
 
 static int g_fj_depth, g_fj_limit;
-static int g_fj_bailed; /* راية التخفي التعاوني: تُرفع في الكود الأصلي وتُفحص بعد كل استدعاء أصلي */
-static int g_fj_ret_bool; /* علم الرجوع المنطقي: 1 = xmm0 يحمل 1.0/0.0 وRAX القيمة الخام 0/1 */
-#define FJ_STACK_BUDGET (384 * 1024) /* ميزانية كومة C للسلسلة الأصلية — التجاوز ينهار الكومة قبل أن يشعل فحص العمق */
+static int g_fj_bailed;
+static int g_fj_ret_bool;
+#define FJ_STACK_BUDGET (384 * 1024)
 
 typedef struct { const uint8_t *ip; uint8_t op; int a; int len; int tgt; } FI;
 typedef struct { uint8_t kind; double imm; int ref; } FV;
@@ -28,16 +28,16 @@ typedef struct {
   int8_t *depth; uint8_t *ty; uint8_t *fnx; uint8_t *reach; uint8_t *islab;
   int nf; Fun *fns[FJ_MAXDEPS]; int fgi[FJ_MAXDEPS]; Str *fname[FJ_MAXDEPS]; void *fentry[FJ_MAXDEPS];
   XB x; int *lpos; int nlab; struct { int pos, lab; } *fix; int nfix;
-  int maxd; const char *why; FV vs[FJ_MAXD]; int rec; int rt; int rtmix; /* rt: نوع الإرجاع من الرجوعات؛ rtmix: رجوعات متضاربة */
+  int maxd; const char *why; FV vs[FJ_MAXD]; int rec; int rt; int rtmix;
 } FC;
 #define TYP(c, i, k) ((c)->ty[(size_t)(i) * FJ_MAXD + (k)])
 #define FNX(c, i, k) ((c)->fnx[(size_t)(i) * FJ_MAXD + (k)])
-/* من هنا فصاعداً: التحليل والبنية المشتركة معماريّاً-محايدة — الترميز فقط يتفرع لاحقاً.
-   fc_jmp/fc_jcc متطابقتا المصدر: الفرق (عنصر نائب 4 بايتات أم لا) داخل fc_fix وjx_rel32_* */
+
+
 static bool fj_compile(Closure *clo);
-static void fc_fix(FC *c, int lab); /* معرّفة في البلوك المعماري — تستدعيها fc_jmp/fc_jcc هنا */
-/* خلية القيمة-المكدس i في إطار الدالة المجمّعة — لكل معمارية تخطيطها:
-   ARM64: [0]=x30 المنقذ، [8]=حشو، القيم من 16 | ويندوز x64: مساحة ظل 32 | SysV x64: من 0 */
+static void fc_fix(FC *c, int lab);
+
+
 #if JX_ARM
 #define CELL(i) RSP, (int)(16 + 8 * (i))
 #elif JX_WIN
@@ -78,7 +78,7 @@ static bool fc_resolve_global(FC *c, Str *name, int *out) {
   Closure *g = AS_CLO(v); Fun *gf = g->f;
   if (g->globals != c->clo->globals || gf->upc != 0 || gf->variadic || gf->kind || gf->getter || gf->arity > FJ_MAXARGS) { c->why = "callee"; return false; }
   for (int i = 0; i < c->nf; i++) if (c->fname[i] == name) { *out = i; return true; }
-  if (gf == c->f) c->rec = 1; /* تعاودية ذاتياً: يحتاج حماية setjmp في التنفيذ */
+  if (gf == c->f) c->rec = 1;
   if (c->nf >= FJ_MAXDEPS) { c->why = "deps"; return false; }
   void *entry = NULL;
   if (gf != c->f) {
@@ -123,7 +123,7 @@ static bool fc_step(FC *c, int i, uint8_t *ty, uint8_t *fx, int *dp) {
       if (ty[d - 1 - n] != FJT_FN) { c->why = "call-target"; return false; }
       Fun *cf = c->fns[fx[d - 1 - n]]; if (cf->arity != n) { c->why = "arity"; return false; }
       for (int k = 0; k < n; k++) if (ty[d - n + k] != FJT_NUM) { c->why = "call-arg"; return false; }
-      d -= n; ty[d - 1] = cf == c->f ? FJT_NUM : (uint8_t)cf->fj->rt; break; /* نوع النتيجة = إرجاع المستدعى (الذاتي: عدد — المتعاذ المنطقي يُرفض لاحقاً) */
+      d -= n; ty[d - 1] = cf == c->f ? FJT_NUM : (uint8_t)cf->fj->rt; break;
     }
     default: c->why = op_names[in->op]; return false;
   }
@@ -195,7 +195,7 @@ static void fc_store_xmm0(FC *c, int k) { jx_movsd_mr(&c->x, CELL(k), 0); c->vs[
 static void fc_store_bool(FC *c, int k) { jx_movzx8_rr(&c->x, RAX, RAX); jx_mov_mr(&c->x, CELL(k), RAX); c->vs[k].kind = 0; }
 
 #if SOLAN_JIT == 1
-/* العنصر النائب rel32 يُصدر هنا (بعد رمز العملية من fc_jmp/fc_jcc/fc_call) */
+
 static void fc_fix(FC *c, int lab) {
   if (c->nfix >= FJ_MAXFIX) { c->why = "fixups"; xb_u32(&c->x, 0); return; }
   c->fix[c->nfix].pos = c->x.n; c->fix[c->nfix].lab = lab; c->nfix++; xb_u32(&c->x, 0);
@@ -270,59 +270,59 @@ static void fc_emit(FC *c, int frame_size) {
         int n = in->a, base = d - 1 - n; int fi = FNX(c, i, base); Fun *cf = c->fns[fi];
         for (int k = 0; k < n; k++) fc_ld(c, k, base + 1 + k);
         if (cf == c->f) fc_call(c, LB_ENTRY(c)); else { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->fentry[fi]); jx_call_rax(x); }
-        /* النتيجة تُخزَّن قبل فحص التخفي: الرجوع المنطقي يصل خاماً في RAX ويُفسده تحميل عنوان الراية */
+
         if (cf != c->f && cf->fj->rt == FJT_BOOL) { jx_mov_mr(x, CELL(base), RAX); c->vs[base].kind = 0; }
         else fc_store_xmm0(c, base);
-        /* انتشار التخفي: إن خفّى المستدعى (عمق/قسمة صفر) فأنزل من هنا أيضاً — لا longjmp */
+
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
         jx_cmp32_mi(x, RAX, 0, 0); fc_jcc(c, CC_NE, LB_BAIL(c));
         break;
       }
       case OP_RETURN: {
-        /* إنزال العمق أولاً — RAX قد يحمل القيمة المنطقية بعده. العلم يُكتب في كل رجوع:
-           الرجوع العددي يصفّره (استدعاء داخلي منطقي قد سبق في نفس الدعوة) والمنطقي يرفعه */
+
+
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth); jx_rm(x, 0, 0, 0x83, 5, RAX, -1, 0, 0); xb_b(x, 1);
         if (TYP(c, i, d - 1) == FJT_BOOL) {
-          fc_ldq(c, d - 1); jx_movzx8_rr(x, RAX, RAX); /* RAX = 0/1 الخام لمستدعي الجيت — fc_ldq يصيب الخلية المرجعية (kind=2) لا الخلية العليا الخاطئة */
-          jx_cvtsi2sd32(x, 0, RAX); /* xmm0 = 1.0/0.0 لحدّ المفسّر */
-          jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x01); xb_u32(x, 1); /* mov dword [rcx], 1 */
+          fc_ldq(c, d - 1); jx_movzx8_rr(x, RAX, RAX);
+          jx_cvtsi2sd32(x, 0, RAX);
+          jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x01); xb_u32(x, 1);
         } else {
           fc_ld(c, 0, d - 1);
-          jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 0); /* mov dword [rax], 0 */
+          jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_ret_bool); xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 0);
         }
         xb_b(x, 0xC9); jx_ret(x); break;
       }
       default: c->why = "emit"; return;
     }
   }
-  /* نقطة التخفي التعاوني: ارفع الراية وأنزل إطاراً واحداً. لا longjmp هنا:
-     longjmp على Win64 يمشي الإطارات عبر RtlUnwind وينهار على كود مولّد بلا معلومات فك */
+
+
   fc_bind(c, LB_BAIL(c));
   jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
-  xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 1); /* mov dword [rax], 1 */
+  xb_b(x, 0xC7); xb_b(x, 0x00); xb_u32(x, 1);
   jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth);
-  jx_rm(x, 0, 0, 0x83, 5, RAX, -1, 0, 0); xb_b(x, 1); /* sub dword [rax], 1 */
+  jx_rm(x, 0, 0, 0x83, 5, RAX, -1, 0, 0); xb_b(x, 1);
   xb_b(x, 0xC9); jx_ret(x);
 }
 
 #elif SOLAN_JIT == 2
-/* ARM64: نفس البنية بترميز AArch64 عبر arm64.inc. الإطار يحفظ x30 فقط (bl/blr
-   يسحقانه) — بقية المستعملين x0-x2/x9-x10/d0-d7 عابرون كلها — والقيم في خلايا
-   [sp+16+8i] (تخطيط CELL في القسم المشترك أعلاه) */
-/* لا عنصر نائب إضافي: b/b.cond/bl نفسها العنصر النائب — يُسجَّل الموضع بعدها */
+
+
+
+
 static void fc_fix(FC *c, int lab) {
   if (c->nfix >= FJ_MAXFIX) { c->why = "fixups"; return; }
   c->fix[c->nfix].pos = c->x.n; c->fix[c->nfix].lab = lab; c->nfix++;
 }
-static void fc_call(FC *c, int lab) { jx_emit(&c->x, 0x94000000u); fc_fix(c, lab); } /* bl placeholder */
+static void fc_call(FC *c, int lab) { jx_emit(&c->x, 0x94000000u); fc_fix(c, lab); }
 
 static void fc_emit(FC *c, int frame_size) {
   XB *x = &c->x; int ar = c->f->arity;
-  if (frame_size > 504) { c->why = "frame"; return; } /* حد ترميز stp pre-index (imm7×8) */
+  if (frame_size > 504) { c->why = "frame"; return; }
   fc_bind(c, LB_ENTRY(c));
-  /* البرولوج: stp x30, xzr, [sp, #-fs]! — حفظ LR والخصم في تعليمة واحدة */
+
   jx_stp_pre64(x, 30, 31, frame_size);
-  /* عداد العمق: ++g_fj_depth ثم مقارنة الحد */
+
   jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth);
   jx_mov32_rm(x, RCX, RAX, 0);
   jx_add32_ri(x, RCX, 1);
@@ -330,7 +330,7 @@ static void fc_emit(FC *c, int frame_size) {
   jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)&g_fj_limit);
   jx_cmp32_rm(x, RCX, RDX, 0);
   fc_jcc(c, CC_G, LB_BAIL(c));
-  /* الوسائط العشرية وصلت في d0-d7 (AAPCS) — خزّنها في خلايا الإطار */
+
   for (int k = 0; k < ar; k++) jx_movsd_mr(x, CELL(k + 1), k);
   for (int k = 0; k < FJ_MAXD; k++) c->vs[k].kind = 0;
   for (int i = 0; i < c->n; i++) {
@@ -349,8 +349,8 @@ static void fc_emit(FC *c, int frame_size) {
       case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: {
         fc_ld(c, 0, d - 2); fc_ld(c, 1, d - 1);
         if (in->op == OP_DIV) {
-          /* القسمة على صفر تخفي (كالمفسّر)؛ NaN يقسم طبيعياً — b.eq لا يُطلق على
-             unordered على ARM (Z=0) فيغني عن JP+6 الخاص بـx86 */
+
+
           jx_xorpd(x, 2, 2); jx_ucomisd(x, 1, 2); fc_jcc(c, CC_E, LB_BAIL(c));
           jx_divsd(x, 0, 1);
         } else if (in->op == OP_ADD) jx_addsd(x, 0, 1); else if (in->op == OP_SUB) jx_subsd(x, 0, 1); else jx_mulsd(x, 0, 1);
@@ -384,7 +384,7 @@ static void fc_emit(FC *c, int frame_size) {
         if (TYP(c, i, d - 1) == FJT_BOOL) { jx_cmp32_mi(x, CELL(d - 1), 0); fc_jcc(c, jf ? CC_E : CC_NE, in->tgt); }
         else {
           jx_movsd_rm(x, 0, CELL(d - 1)); jx_xorpd(x, 1, 1); jx_ucomisd(x, 0, 1);
-          if (jf) fc_jcc(c, CC_E, in->tgt); /* b.eq لا يُطلق على unordered (Z=0) — يغني عن JP+6 الخاص بـx86 */
+          if (jf) fc_jcc(c, CC_E, in->tgt);
           else { fc_jcc(c, CC_P, in->tgt); fc_jcc(c, CC_NE, in->tgt); }
         }
         break;
@@ -393,24 +393,24 @@ static void fc_emit(FC *c, int frame_size) {
       case OP_GET_GLOBAL: c->vs[d].kind = 0; break;
       case OP_CALL: {
         int n = in->a, base = d - 1 - n; int fi = FNX(c, i, base); Fun *cf = c->fns[fi];
-        for (int k = 0; k < n; k++) fc_ld(c, k, base + 1 + k); /* d0-d7 سجلات الوسائط AAPCS مباشرة */
+        for (int k = 0; k < n; k++) fc_ld(c, k, base + 1 + k);
         if (cf == c->f) fc_call(c, LB_ENTRY(c)); else { jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->fentry[fi]); jx_call_rax(x); }
-        /* النتيجة تُخزَّن قبل فحص التخفي: الرجوع المنطقي يصل خاماً في x0 ويُفسده تحميل عنوان الراية */
+
         if (cf != c->f && cf->fj->rt == FJT_BOOL) { jx_mov_mr(x, CELL(base), RAX); c->vs[base].kind = 0; }
         else fc_store_xmm0(c, base);
-        /* انتشار التخفي: إن خفّى المستدعى (عمق/قسمة صفر) فأنزل من هنا أيضاً — لا longjmp */
+
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
         jx_cmp32_mi(x, RAX, 0, 0); fc_jcc(c, CC_NE, LB_BAIL(c));
         break;
       }
       case OP_RETURN: {
-        /* إنزال العمق أولاً — x0 قد يحمل القيمة المنطقية بعده. العلم يُكتب في كل رجوع:
-           الرجوع العددي يصفّره (استدعاء داخلي منطقي قد سبق في نفس الدعوة) والمنطقي يرفعه */
+
+
         jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_depth);
         jx_mov32_rm(x, RCX, RAX, 0); jx_sub32_ri(x, RCX, 1); jx_mov32_mr(x, RAX, 0, RCX);
         if (TYP(c, i, d - 1) == FJT_BOOL) {
-          fc_ldq(c, d - 1); /* x0 = 0/1 الخام — fc_ldq يصيب الخلية المرجعية (kind=2) الصحيحة */
-          jx_cvtsi2sd32(x, 0, RAX); /* d0 = 1.0/0.0 لحدّ المفسّر */
+          fc_ldq(c, d - 1);
+          jx_cvtsi2sd32(x, 0, RAX);
           jx_mov_ri(x, RCX, (uint64_t)(uintptr_t)&g_fj_ret_bool); jx_mov32_mi(x, RCX, 0, 1);
         } else {
           fc_ld(c, 0, d - 1);
@@ -421,7 +421,7 @@ static void fc_emit(FC *c, int frame_size) {
       default: c->why = "emit"; return;
     }
   }
-  /* نقطة التخفي التعاوني: ارفع الراية وأنزل إطاراً واحداً — ret عادي بلا longjmp */
+
   fc_bind(c, LB_BAIL(c));
   jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)&g_fj_bailed);
   jx_mov32_mi(x, RAX, 0, 1);
@@ -429,7 +429,7 @@ static void fc_emit(FC *c, int frame_size) {
   jx_mov32_rm(x, RCX, RAX, 0); jx_sub32_ri(x, RCX, 1); jx_mov32_mr(x, RAX, 0, RCX);
   jx_ldr64_raw(x, 30, 31, 0); jx_add_rsp(x, frame_size); jx_ret(x);
 }
-#endif /* ترميز fnjit لكل معمارية */
+#endif
 
 static void fj_free(Fun *f) {
   if (f->fj) { if (f->fj->mem) { munmap(f->fj->mem, f->fj->msz); g_jit_bytes -= f->fj->msz; } free(f->fj); f->fj = NULL; }
@@ -448,7 +448,7 @@ static bool fj_compile(Closure *clo) {
   c->reach = calloc(FJ_MAXI, 1); c->islab = calloc(FJ_MAXI, 1);
   c->nf = 0;
   if (!fc_analyze(c)) { if (g_jit_trace) fprintf(stderr, "[fnjit] رُفضت '%s': %s\n", f->name ? f->name->chars : "?", c->why ? c->why : "?"); goto out; }
-  if (c->rtmix || (c->rec && c->rt == FJT_BOOL)) { /* رجوعات متضاربة، أو تعاذٍ منطقي (نتيجته تُخزَّن عددية في الاستدعاء الذاتي) */
+  if (c->rtmix || (c->rec && c->rt == FJT_BOOL)) {
     c->why = c->rtmix ? "return-mixed" : "rec-bool";
     if (g_jit_trace) fprintf(stderr, "[fnjit] رُفضت '%s': %s\n", f->name ? f->name->chars : "?", c->why); goto out;
   }
@@ -456,9 +456,9 @@ static bool fj_compile(Closure *clo) {
   c->lpos = malloc(sizeof(int) * (size_t)(c->n + 4)); for (int i = 0; i < c->n + 4; i++) c->lpos[i] = -1;
   c->fix = malloc(sizeof(c->fix[0]) * FJ_MAXFIX);
 #if JX_ARM
-  int fs = ((c->maxd + 2) * 8 + 16 + 15) & ~15; /* +16: خلية x30 المنقذة في البرولوج */
+  int fs = ((c->maxd + 2) * 8 + 16 + 15) & ~15;
 #elif JX_WIN
-  int fs = ((c->maxd + 2) * 8 + 32 + 15) & ~15; /* +32 لمساحة الظل */
+  int fs = ((c->maxd + 2) * 8 + 32 + 15) & ~15;
 #else
   int fs = ((c->maxd + 2) * 8 + 15) & ~15;
 #endif
@@ -467,7 +467,7 @@ static bool fj_compile(Closure *clo) {
   for (int k = 0; k < c->nfix; k++) {
     int tp = c->lpos[c->fix[k].lab]; if (tp < 0) goto out;
 #if JX_ARM
-    /* التعليمة نفسها العنصر النائب عند pos-4: b/bl (t6=5/37) ترقَّع imm26، وb.cond ترقَّع imm19 */
+
     int ipos = c->fix[k].pos - 4; uint32_t w; memcpy(&w, c->x.p + ipos, 4);
     int32_t rel = tp - ipos; uint32_t t6 = w >> 26;
     if (t6 == 5 || t6 == 37) w = (w & 0xFC000000u) | ((uint32_t)(rel / 4) & 0x03FFFFFFu);
@@ -504,7 +504,7 @@ static bool fj_run(Closure *clo, Value *args, int argc, Value *out) {
   double a[FJ_MAXARGS];
   for (int i = 0; i < argc; i++) { if (!IS_NUM(args[i])) return false; a[i] = args[i].as.n; }
   g_fj_depth = 0; g_fj_bailed = 0; g_fj_ret_bool = 0; g_fj_limit = vm.frames_max - vm.fcount - 4;
-  { /* سقف كومة C: كل مستوى أصلي يستهلك fs+16 بايت — حد أكبر من الكومة ينهارها قبل أن يشعل فحص العمق */
+  {
     int lim = (int)(FJ_STACK_BUDGET / (fj->fs + 64));
     if (g_fj_limit > lim) g_fj_limit = lim;
   }
@@ -517,16 +517,16 @@ static bool fj_run(Closure *clo, Value *args, int argc, Value *out) {
     case 3: r = ((double (*)(double, double, double))fj->entry)(a[0], a[1], a[2]); break;
     case 4: r = ((double (*)(double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3]); break;
     case 5: r = ((double (*)(double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4]); break;
-#if FJ_MAXARGS > 6 /* ARM64 فقط: d6/d7 وسائطان إضافيتان */
+#if FJ_MAXARGS > 6
     case 6: r = ((double (*)(double, double, double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4], a[5], a[6]); break;
     case 7: r = ((double (*)(double, double, double, double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
 #endif
     default: r = ((double (*)(double, double, double, double, double, double))fj->entry)(a[0], a[1], a[2], a[3], a[4], a[5]); break;
   }
-  if (g_fj_bailed) { fj->bails++; return false; } /* خفّى الكود الأصلي (عمق/قسمة صفر): أعدها للمفسّر */
+  if (g_fj_bailed) { fj->bails++; return false; }
   *out = g_fj_ret_bool ? BOOLV(r != 0) : NUMV(r); return true;
 }
 #else
 static void fj_free(Fun *f) { (void)f; }
 static void fj_mark(Fun *f) { (void)f; }
-#endif /* SOLAN_JIT */
+#endif

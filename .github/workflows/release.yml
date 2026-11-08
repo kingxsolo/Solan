@@ -98,7 +98,7 @@ jobs:
             choco install innosetup -y --no-progress
             $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           }
-          & $iscc /DExeName=solan.exe "/DSolanVersion=$env:VER" pc/installer.iss
+          & $iscc "/DExeName=$PWD/solan.exe" "/DSolanVersion=$env:VER" pc/installer.iss
           if ($LASTEXITCODE -ne 0) { throw "فشل بناء المُثبِّت" }
 
       - name: رفع المخرجات

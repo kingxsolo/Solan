@@ -6,7 +6,7 @@ typedef struct {
   int (*SSL_read)(void *, void *, int); int (*SSL_write)(void *, const void *, int); int (*SSL_shutdown)(void *);
   void (*SSL_free)(void *); int (*SSL_get_error)(const void *, int); int (*SSL_pending)(const void *);
   int (*SSL_CTX_use_certificate_chain_file)(void *, const char *); int (*SSL_CTX_use_PrivateKey_file)(void *, const char *, int);
-  /* اختيارية — لبصمة TLS (متوفرة في OpenSSL 1.1.1+) */
+
   int (*SSL_CTX_set_cipher_list)(void *, const char *); int (*SSL_CTX_set_ciphersuites)(void *, const char *);
   int (*SSL_CTX_set1_groups_list)(void *, const char *); int (*SSL_set_alpn_protos)(void *, const unsigned char *, unsigned int);
   void (*SSL_CTX_free)(void *); int (*SSL_CTX_load_verify_locations)(void *, const char *, const char *);
@@ -55,8 +55,8 @@ static bool tls_load(void) {
   *(void **)&tl.SSL_CTX_load_verify_locations = dlsym(tl.h, "SSL_CTX_load_verify_locations");
   tls_state = 1; return true;
 }
-/* شهادات الجذر: المسارات الافتراضية + حزم CA المعروفة (Git وغيرها) دائماً —
-   لأن set_default_verify_paths قد "ينجح" على ويندوز دون تحميل أي شهادة */
+
+
 static void tls_set_verify_paths(void *ctx) {
   tl.SSL_CTX_set_default_verify_paths(ctx);
   if (!tl.SSL_CTX_load_verify_locations) return;
@@ -173,7 +173,7 @@ static int tcp_connect(const char *host, int port, int tmo, char *err, int es) {
   if (fd >= MAXFD) { close(fd); snprintf(err, es, "عدد الاتصالات كبير جدا"); return -1; }
   int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); fd_setup(fd); return fd;
 }
-/* ============ بروكسي: socks5://[user:pass@]host:port أو http://host:port ============ */
+
 static bool proxy_split(const char *proxy, char *scheme, int scn, char *ph, int phn, int *pport, char *user, int un, char *pass, int pn, char *err, int es) {
   const char *p = strstr(proxy, "://");
   if (p) { size_t sl = (size_t)(p - proxy); if (sl >= (size_t)scn) { snprintf(err, es, "بروتوكول بروكسي غير معروف"); return false; } memcpy(scheme, proxy, sl); scheme[sl] = 0; p += 3; }
@@ -200,7 +200,7 @@ static bool proxy_split(const char *proxy, char *scheme, int scn, char *ph, int 
   if (!ph[0] || *pport <= 0 || *pport > 65535) { snprintf(err, es, "عنوان بروكسي غير صالح: %s", proxy); return false; }
   return true;
 }
-/* يبني نفقًا عبر البروكسي إلى host:port — يُستدعى بعد الاتصال بالبروكسي نفسه وقبل TLS */
+
 static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, int tmo, char *err, int es) {
   if (!proxy || !*proxy) return true;
   char scheme[16], ph[256], user[128], pass[128]; int pport;
@@ -209,7 +209,7 @@ static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, 
     snprintf(err, es, "بروتوكول بروكسي غير مدعوم: %s (مدعوم: socks5 وhttp)", scheme); return false;
   }
   if (!strcmp(scheme, "http")) {
-    /* HTTP CONNECT */
+
     Buf rq; buf_init(&rq);
     buf_fmt(&rq, "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", host, port, host, port);
     if (user[0]) {
@@ -221,21 +221,21 @@ static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, 
     if (conn_write(fd, rq.p, rq.n) < 0) { free(rq.p); snprintf(err, es, "فشل إرسال CONNECT للبروكسي"); return false; }
     free(rq.p);
     Buf line; buf_init(&line);
-    int r = rb_getline(fd, &line); /* سطر الحالة */
+    int r = rb_getline(fd, &line);
     if (r <= 0) { free(line.p); snprintf(err, es, "لا رد من البروكسي"); return false; }
     char *sp = strchr(line.p, ' '); int sc = sp ? atoi(sp + 1) : 0;
     bool ok = sc >= 200 && sc < 300;
     free(line.p);
-    if (!ok) { /* استهلك بقية الرؤوس للوضوح ثم أفشل */
+    if (!ok) {
       for (int i = 0; i < 40; i++) { Buf t; buf_init(&t); int q = rb_getline(fd, &t); free(t.p); if (q <= 0 || t.n == 0) break; }
       snprintf(err, es, "رفض البروكسي الاتصال (CONNECT)"); return false;
     }
     for (int i = 0; i < 40; i++) { Buf t; buf_init(&t); int q = rb_getline(fd, &t); free(t.p); if (q <= 0 || t.n == 0) break; }
     return true;
   }
-  /* SOCKS5 (RFC 1928) — يرسل اسم المضيف كنص فالخادم يحلّه (سلوك socks5h) */
+
   bool authed = user[0] != 0;
-  uint8_t greet[4] = {5, 2, 0, 2}; /* بلا توثيق + توثيق user/pass */
+  uint8_t greet[4] = {5, 2, 0, 2};
   if (!authed) greet[1] = 1;
   if (conn_write(fd, (const char *)greet, authed ? 4 : 3) < 0) { snprintf(err, es, "فشل إرسال التحية للبروكسي"); return false; }
   uint8_t gr[2];
@@ -259,28 +259,28 @@ static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, 
   if (conn_write(fd, req.p, req.n) < 0) { free(req.p); snprintf(err, es, "فشل إرسال طلب الاتصال للبروكسي"); return false; }
   free(req.p);
   Buf rep; buf_init(&rep);
-  int q = rb_exact(fd, 4, &rep); /* VER REP RSV ATYP */
+  int q = rb_exact(fd, 4, &rep);
   if (q != 1) { free(rep.p); snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
   uint8_t code = (uint8_t)rep.p[1], atyp = (uint8_t)rep.p[3]; free(rep.p);
-  int rest = atyp == 1 ? 4 : atyp == 4 ? 16 : 0; /* IPv4 | IPv6 | نطاق */
+  int rest = atyp == 1 ? 4 : atyp == 4 ? 16 : 0;
   if (atyp == 3) {
     Buf t2; buf_init(&t2); int q1 = rb_exact(fd, 1, &t2);
     if (q1 != 1) { free(t2.p); snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
     rest = (uint8_t)t2.p[0]; free(t2.p);
   }
-  rest += 2; /* المنفذ */
+  rest += 2;
   Buf t3; buf_init(&t3); int q2 = rb_exact(fd, rest, &t3); free(t3.p);
   if (q2 != 1) { snprintf(err, es, "رد بروكسي غير مكتمل"); return false; }
   if (code != 0) { snprintf(err, es, "رفض البروكسي الاتصال بالهدف (رمز %d)", code); return false; }
   return true;
 }
-/* ============ بصمة TLS ============ */
+
 typedef struct {
-  const char *ciphers;      /* تشفيرات TLS1.2 وأقدم — بالترتيب */
-  const char *ciphersuites; /* تشفيرات TLS1.3 */
-  const char *groups;       /* منحنيات تبادل المفاتيح */
-  const char *alpn;         /* قائمة بفواصل: "http/1.1" */
-  int minver, maxver;       /* 0x0303 = 1.2، 0x0304 = 1.3؛ 0 = افتراضي */
+  const char *ciphers;
+  const char *ciphersuites;
+  const char *groups;
+  const char *alpn;
+  int minver, maxver;
 } TlsOpts;
 static bool tls_opts_preset(const char *name, TlsOpts *o) {
   memset(o, 0, sizeof *o);
@@ -303,7 +303,7 @@ static bool tls_opts_preset(const char *name, TlsOpts *o) {
   if (!strcmp(name, "curl")) { o->minver = 0x0303; o->alpn = "http/1.1"; return true; }
   return false;
 }
-/* تحويل قائمة ALPN "http/1.1,h2" إلى الشكل السلكي (طول+بايتات) */
+
 static int alpn_wire(const char *alpn, unsigned char *w, int wn) {
   int n = 0; const char *p = alpn;
   while (*p) {
@@ -321,13 +321,13 @@ static bool tls_wrap_client_ex(int fd, const char *host, bool verify, const TlsO
   if (!tls_load()) { snprintf(err, es, "التشفير غير متاح: لم أجد libssl — %s", TLS_HINT); return false; }
   void *ctx = NULL; bool own = false;
   if (o && (o->ciphers || o->ciphersuites || o->groups || o->alpn || o->minver || o->maxver)) {
-    /* سياق مخصص للطلب — لا نلمس السياق المشترك */
+
     ctx = tl.SSL_CTX_new(tl.TLS_client_method()); own = true;
     if (!ctx) { snprintf(err, es, "تعذّر إنشاء جلسة TLS مخصصة"); return false; }
     tl.SSL_CTX_set_verify(ctx, verify ? 1 : 0, NULL);
     if (verify) tls_set_verify_paths(ctx);
-    if (o->minver) tl.SSL_ctrl(ctx, 123, o->minver, NULL); /* SET_MIN_PROTO_VERSION */
-    if (o->maxver) tl.SSL_ctrl(ctx, 124, o->maxver, NULL); /* SET_MAX_PROTO_VERSION */
+    if (o->minver) tl.SSL_ctrl(ctx, 123, o->minver, NULL);
+    if (o->maxver) tl.SSL_ctrl(ctx, 124, o->maxver, NULL);
     if (o->ciphers && tl.SSL_CTX_set_cipher_list && !tl.SSL_CTX_set_cipher_list(ctx, o->ciphers)) {
       tl.SSL_CTX_free(ctx); snprintf(err, es, "قائمة تشفيرات غير صالحة: %s", o->ciphers); return false;
     }
@@ -339,7 +339,7 @@ static bool tls_wrap_client_ex(int fd, const char *host, bool verify, const TlsO
     }
   } else ctx = get_ctx(verify);
   void *ssl = ctx ? tl.SSL_new(ctx) : NULL;
-  if (own && tl.SSL_CTX_free) tl.SSL_CTX_free(ctx); /* SSL يحمل مرجعه الخاص (OpenSSL >= 1.1) */
+  if (own && tl.SSL_CTX_free) tl.SSL_CTX_free(ctx);
   if (!ssl) { snprintf(err, es, "تعذّر إنشاء جلسة TLS"); return false; }
   tl.SSL_set_fd(ssl, FDSYS(fd)); tl.SSL_ctrl(ssl, 55, 0, (void *)host);
   if (o && o->alpn && tl.SSL_set_alpn_protos) {

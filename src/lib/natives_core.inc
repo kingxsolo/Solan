@@ -144,13 +144,13 @@ NAT(s_exit) { fflush(stdout); exit(argc > 0 && IS_NUM(a[0]) ? (int)a[0].as.n : 0
 NAT(s_exec) {
   SAFE();
   STRA(0);
-  /* نفذ(أمر) — السلوك القديم: نص الخرج فقط */
+
   if (argc < 2 || IS_NIL(a[1])) {
     fflush(stdout); FILE *p = popen(AS_STR(a[0])->chars, "r"); if (!p) FAIL("تعذّر تنفيذ الأمر");
     Buf b; buf_init(&b); char tmp[4096]; size_t n; while ((n = fread(tmp, 1, sizeof tmp, p)) > 0) buf_add(&b, tmp, (int)n);
     pclose(p); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true;
   }
-  /* نفذ(أمر, خيارات) — خريطة: دخل, مهلة, مجلد → {رمز, ناتج, خطأ, انتهى_الوقت} */
+
   if (!IS_T(a[1], O_MAP)) FAIL("الوسيط الثاني لـ نفذ يجب أن يكون خريطة خيارات");
   Dict *od = &AS_MAP(a[1])->d;
   Value vin = NIL, vtmo = NIL, vcwd = NIL;
@@ -163,7 +163,7 @@ NAT(s_exec) {
   }
   const char *indata = NULL; size_t inn = 0;
   if (!IS_NIL(vin)) { Str *s = tostr(vin); indata = s->chars; inn = (size_t)s->len; }
-  int tmo = IS_NUM(vtmo) ? (int)(vtmo.as.n * 1000) : 0; /* المهلة بالثواني — كشبكة.جلب */
+  int tmo = IS_NUM(vtmo) ? (int)(vtmo.as.n * 1000) : 0;
   if (tmo < 0) tmo = 0;
   const char *cwd = IS_T(vcwd, O_STR) ? AS_STR(vcwd)->chars : NULL;
   char *outp = NULL, *errp = NULL; size_t outn = 0, errn = 0;
@@ -220,7 +220,7 @@ static void json_str(Buf *b, Str *s) {
   buf_addc(b, '"');
   const char *p = s->chars, *end = p + s->len;
   while (p < end) {
-    /* مسار سريع: نسخ الجرعة الآمنة دفعة واحدة بدل فحص كل بايت عبر buf_addc */
+
     const char *q = p;
     while (q < end) { unsigned char c = (unsigned char)*q; if (c < 0x20 || c == '"' || c == '\\') break; q++; }
     if (q > p) { buf_add(b, p, (int)(q - p)); p = q; }
@@ -231,7 +231,7 @@ static void json_str(Buf *b, Str *s) {
       case '\n': buf_add(b, "\\n", 2); break;
       case '\r': buf_add(b, "\\r", 2); break;
       case '\t': buf_add(b, "\\t", 2); break;
-      default: { /* حرف تحكم < 0x20: ترميز \u يدوياً بلا snprintf */
+      default: {
         static const char hx[] = "0123456789abcdef";
         char esc[6] = { '\\', 'u', '0', '0', hx[((*p) >> 4) & 3], hx[*p & 15] };
         buf_add(b, esc, 6);

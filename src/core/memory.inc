@@ -30,7 +30,7 @@ static void pool_free(void *p, size_t n) {
   if (n > POOL_MAX) { free(p); return; }
   size_t c = (n + 15) >> 4; *(void **)p = g_pool_fl[c]; g_pool_fl[c] = p;
 }
-/* مصفوفات القواميس: الصغيرة عبر المجمّع (فك/ترميز يولّدان آلاف القواميس القصيرة) — إقران الحجم بين التخصيص والتحرير */
+
 static void *dalloc(size_t n) { return n <= POOL_MAX ? pool_alloc(n) : xalloc(n); }
 static void dfree_sz(void *p, size_t n) { if (!p) return; if (n <= POOL_MAX) { pool_free(p, n); return; } free(p); }
 static Obj *newobj(size_t sz, OT t) {
@@ -42,7 +42,7 @@ static Obj *newobj(size_t sz, OT t) {
 
 static void buf_init(Buf *b) { b->p = NULL; b->n = b->cap = 0; }
 static void buf_add(Buf *b, const char *s, int n) {
-  if (n < 0) return; /* دفاع: طول سالب (بيانات فاسدة) — تجاهل بدل سلوك غير معرّف */
+  if (n < 0) return;
   if (b->n + n + 1 > b->cap) {
     int nc = b->cap ? b->cap * 2 : 64;
     while (nc < b->n + n + 1) nc *= 2;
@@ -123,7 +123,7 @@ static inline uint64_t hb_mix(uint64_t a, uint64_t b) {
   __uint128_t m = (__uint128_t)(a ^ 0x9E3779B97F4A7C15ull) * (b ^ 0xD6E8FEB86659FD93ull);
   return (uint64_t)m ^ (uint64_t)(m >> 64);
 #else
-  /* 32-بت: بلا __int128 — ضرب 64×64→128 يدوياً بأطراف 32-بت (نفس جودة الخلط، قيم محلية العملية) */
+
   uint64_t alo = (uint32_t)a, ahi = a >> 32, blo = (uint32_t)b, bhi = b >> 32;
   uint64_t p0 = alo * blo, p1 = alo * bhi, p2 = ahi * blo, p3 = ahi * bhi;
   uint64_t mid = p1 + (p0 >> 32) + (uint32_t)p2;
@@ -281,7 +281,7 @@ static void dset(Dict *d, Value k, Value v) {
   if (d->n == d->cap) drebuild(d, d->cap == 0 ? 4 : (d->live * 2 >= d->cap ? d->cap * 2 : d->cap));
   uint32_t m = d->icap - 1, j = h & m;
   while (d->idx[j] != -1) j = (j + 1) & m;
-  d->idx[j] = d->n; d->e[d->n].k = k; d->e[d->n].v = v; d->n++; d->live++; d->gen++; /* gen: جيل الإلحاق — أساس حارس ظلّ المدمج في JIT */
+  d->idx[j] = d->n; d->e[d->n].k = k; d->e[d->n].v = v; d->n++; d->live++; d->gen++;
 }
 static bool dget(Dict *d, Value k, Value *out) {
   int x = dfind(d, k, vhash(k)); if (x < 0) return false;

@@ -9,31 +9,33 @@ Set-Location $PSScriptRoot
 
 Write-Host "سولان — بناء نسخة ويندوز الأصلية" -ForegroundColor Cyan
 
-# 1) المترجم المحمول (مرة واحدة فقط)
-$gcc = "C:\Solan-PC\tools\mingw64\bin\gcc.exe"
+# 1) المترجم المحمول (مرة واحدة فقط) — نسبة إلى مجلد المستودع نفسه
+$gcc = Join-Path $PSScriptRoot "tools\mingw64\bin\gcc.exe"
 if (-not (Test-Path $gcc)) {
   & powershell -ExecutionPolicy Bypass -File "pc\get-compiler.ps1"
   if (-not (Test-Path $gcc)) { throw "تعذّر تجهيز المترجم" }
 }
 
 # 2) البناء
-$args = @()
-if ($NoInstaller) { $args += "-NoStrip" }
-& powershell -ExecutionPolicy Bypass -File "pc\build-pc.ps1" @args
+$buildArgs = @()
+if ($NoInstaller) { $buildArgs += "-NoStrip" }
+& powershell -ExecutionPolicy Bypass -File "pc\build-pc.ps1" @buildArgs
 if (-not (Test-Path "dist\solan.exe")) { throw "فشل البناء" }
 
 # 3) التثبيت
 New-Item -ItemType Directory -Force -Path "$Prefix\bin" | Out-Null
 Copy-Item "dist\solan.exe" "$Prefix\bin\solan.exe" -Force
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$Prefix\bin*") {
-  [Environment]::SetEnvironmentVariable("Path", "$userPath;$Prefix\bin", "User")
-  Write-Host "أُضيف $Prefix\bin إلى PATH — افتح نافذة طرفية جديدة" -ForegroundColor Yellow
+$binDir = "$Prefix\bin"
+$userPath = [string][Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ';') -notcontains $binDir) {
+  $newPath = $binDir
+  if ($userPath) { $newPath = "$userPath;$binDir" }
+  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+  Write-Host "أُضيف $binDir إلى PATH — افتح نافذة طرفية جديدة" -ForegroundColor Yellow
 }
 
 # 4) المُثبِّت الجاهز للتوزيع
-if (Test-Path "dist\Solan-1.2.0-Setup-x64.exe") {
-  Write-Host "المُثبِّت جاهز للتوزيع: dist\Solan-1.2.0-Setup-x64.exe" -ForegroundColor Green
-}
+$setup = Get-ChildItem "dist\Solan-*-Setup-x64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($setup) { Write-Host "المُثبِّت جاهز للتوزيع: $($setup.FullName)" -ForegroundColor Green }
 
 Write-Host "تم! جرّب:  solan --version" -ForegroundColor Green

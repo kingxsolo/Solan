@@ -1,12 +1,12 @@
-/* ============================================================
-   curve.inc — X25519 + Ed25519 خالص (RFC 7748 / RFC 8032)
-   حقل 2^255-19 بأطراف int64 أساس 2^16 مع حمل كامل،
-   SHA-512 مدمجة (يحتاجها Ed25519)، ثوابت مشتقة وقت التشغيل.
-   ============================================================ */
+
+
+
+
+
 
 static uint64_t crv_ror64(uint64_t x, int s) { return (x >> s) | (x << (64 - s)); }
 
-/* --- SHA-512 --- */
+
 static const uint64_t K512[80] = {
   0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
   0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL,
@@ -54,7 +54,7 @@ static void sha512_raw(const uint8_t *d, size_t n, uint8_t out[64]) {
   for (; i + 128 <= n; i += 128) sha512_blk(h, d + i);
   uint8_t t[256]; size_t r = n - i; memcpy(t, d + i, r); t[r++] = 0x80;
   size_t tot = (r + 16 <= 128) ? 128 : 256; memset(t + r, 0, tot - r);
-  uint64_t bits = (uint64_t)n * 8;   /* حشو 128-بت: الثماني البايتات السابقة أصفار */
+  uint64_t bits = (uint64_t)n * 8;
   for (int k = 0; k < 8; k++) t[tot - 1 - k] = (uint8_t)((bits >> (8 * k)) & 255);
   sha512_blk(h, t); if (tot == 256) sha512_blk(h, t + 128);
   for (int k = 0; k < 8; k++) {
@@ -72,10 +72,10 @@ static void sha512_cat(uint8_t out[64], const uint8_t *p1, size_t n1, const uint
   free(b);
 }
 
-/* --- حساب الحقل: fe = int64[16] أساس 2^16 ، القيمة = Σ h[i]·2^(16i) --- */
+
 typedef int64_t fe[16];
 
-static void fe_carry(fe h);   /* تعريف لاحق */
+static void fe_carry(fe h);
 
 static void fe_zero(fe h) { for (int i = 0; i < 16; i++) h[i] = 0; }
 static void fe_one(fe h) { fe_zero(h); h[0] = 1; }
@@ -85,31 +85,31 @@ static void fe_cswap(fe a, fe b, int c) {
   int64_t m = -(int64_t)(c & 1);
   for (int i = 0; i < 16; i++) { int64_t t = m & (a[i] ^ b[i]); a[i] ^= t; b[i] ^= t; }
 }
-/* الحمل: تمريران (سلسلة حمل ثم طيّ 2^256 ≡ 38) + إصلاح h[0] الخارج قليلاً
-   (استلاف أو حمل متتالٍ مع طيّ أخير) — يضمن كل الأطراف ∈ [0, 2^16) */
+
+
 static void fe_carry(fe h) {
   int64_t c;
   for (int j = 0; j < 2; j++) {
     for (int i = 0; i <= 14; i++) { c = h[i] >> 16; h[i] &= 0xFFFF; h[i + 1] += c; }
-    c = h[15] >> 16;                    /* طيّ: 2^256 ≡ 38 (mod p) */
+    c = h[15] >> 16;
     h[15] &= 0xFFFF;
     h[0] += 38 * c;
   }
-  /* الآن h[1..15] ∈ [0, 2^16) وقد يخرج h[0] بمقدار ±38·c (c ∈ {-1,0,1}) */
+
   if (h[0] >= (1 << 16)) {
     int64_t d = h[0] >> 16; h[0] &= 0xFFFF;
     for (int i = 1; i <= 15 && d; i++) { h[i] += d; d = h[i] >> 16; h[i] &= 0xFFFF; }
-    if (d) h[0] += 38 * d;              /* h[0] < 76 + 38 < 2^16 */
+    if (d) h[0] += 38 * d;
   } else if (h[0] < 0) {
     int64_t d = h[0] >> 16; h[0] &= 0xFFFF;
     for (int i = 1; i <= 15 && d; i++) { h[i] += d; d = h[i] >> 16; h[i] &= 0xFFFF; }
-    if (d) h[0] += 38 * d;              /* d = -1: h[0] -= 38 ويبقى ≥ 0 */
+    if (d) h[0] += 38 * d;
   }
 }
 static void fe_add(fe h, const fe a, const fe b) { for (int i = 0; i < 16; i++) h[i] = a[i] + b[i]; fe_carry(h); }
 static void fe_sub(fe h, const fe a, const fe b) { for (int i = 0; i < 16; i++) h[i] = a[i] - b[i]; fe_carry(h); }
 static void fe_neg(fe h, const fe a) { for (int i = 0; i < 16; i++) h[i] = -a[i]; fe_carry(h); }
-/* ضرب مدرسي 16×16 مع تطبيع المدخلين أولاً ثم طيّ واحد t[k-16] += 38·t[k] */
+
 static void fe_mul(fe h, const fe a, const fe b) {
   fe x, y; fe_copy(x, a); fe_copy(y, b);
   fe_carry(x); fe_carry(y);
@@ -126,11 +126,11 @@ static void fe_mul(fe h, const fe a, const fe b) {
 }
 static void fe_sqr(fe h, const fe a) { fe_mul(h, a, a); }
 
-/* p كأطراف 2^16: 0xFFED ثم 0xFFFF ×14 ثم 0x7FFF */
+
 static const int64_t fe_p[16] = {0xFFED,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0x7FFF};
 
-/* إلى 32 بايت صغرية: حمل ثم طرح شرطي لـ p مرتين (t < 2^256 = 2p+38)
-   باستلاف طبيعي مع إعادة 2^16 — أطراف النتيجة غير سالبة دائماً */
+
+
 static void fe_tobytes(uint8_t out[32], const fe h) {
   fe t; fe_copy(t, h); fe_carry(t);
   for (int n = 0; n < 2; n++) {
@@ -140,7 +140,7 @@ static void fe_tobytes(uint8_t out[32], const fe h) {
       if (x < 0) { x += 1 << 16; br = 1; } else br = 0;
       d[i] = x;
     }
-    if (br) break;                       /* t < p: انتهى */
+    if (br) break;
     for (int i = 0; i < 16; i++) t[i] = d[i];
   }
   for (int i = 0; i < 16; i++) { out[2 * i] = (uint8_t)(t[i] & 0xFF); out[2 * i + 1] = (uint8_t)((t[i] >> 8) & 0xFF); }
@@ -149,7 +149,7 @@ static void fe_frombytes(fe h, const uint8_t in[32]) {
   for (int i = 0; i < 16; i++) h[i] = (int64_t)(uint8_t)in[2 * i] | ((int64_t)(uint8_t)in[2 * i + 1] << 8);
   fe_carry(h);
 }
-/* true إذا كانت القيمة (بعد الحمل) كانونية أي < p */
+
 static bool fe_canon(const fe h) {
   fe t; fe_copy(t, h); fe_carry(t);
   int64_t br = 0;
@@ -159,12 +159,12 @@ static bool fe_canon(const fe h) {
 static bool fe_iszero(const fe h) { uint8_t b[32]; fe_tobytes(b, h); for (int i = 0; i < 32; i++) if (b[i]) return false; return true; }
 static int fe_parity(const fe h) { uint8_t b[32]; fe_tobytes(b, h); return b[0] & 1; }
 
-/* أسّ عام: base^e حيث e عدد 256-بت بأطراف صغرية (little-endian) */
-/* الأسّات الثابتة (بايتات صغرية) */
-static const uint8_t fe_exp_p2[32] = {0xEB,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x7F}; /* p-2 */
-static const uint8_t fe_exp_p14[32] = {0xFB,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x1F}; /* (p-1)/4 */
-static const uint8_t fe_exp_p38[32] = {0xFE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x0F}; /* (p+3)/8 */
-static const uint8_t fe_exp_p58[32] = {0xFD,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x0F}; /* (p-5)/8 */
+
+
+static const uint8_t fe_exp_p2[32] = {0xEB,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x7F};
+static const uint8_t fe_exp_p14[32] = {0xFB,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x1F};
+static const uint8_t fe_exp_p38[32] = {0xFE,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x0F};
+static const uint8_t fe_exp_p58[32] = {0xFD,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x0F};
 
 static void fe_pow(fe out, const fe base, const uint8_t e[32]) {
   fe r; fe_one(r);
@@ -178,18 +178,18 @@ static void fe_pow(fe out, const fe base, const uint8_t e[32]) {
 }
 static void fe_invert(fe out, const fe a) { fe_pow(out, a, fe_exp_p2); }
 
-/* --- الثوابت المشتقة وقت التشغيل ونقطة الأساس --- */
+
 typedef struct { fe X, Y, Z, T; } ge;
 static fe fe_d, fe_d2, fe_sqrtm1, fe_a24;
 static ge fe_base;
 static int crv_ready = 0;
 
-/* --- X25519: سلم RFC 7748 حرفياً مع تقييد المفتاح --- */
+
 static void x25519_core(uint8_t out[32], const uint8_t k[32], const uint8_t u[32]) {
   uint8_t kk[32], uu[32];
   memcpy(kk, k, 32); memcpy(uu, u, 32);
   kk[0] &= 248; kk[31] &= 127; kk[31] |= 64;
-  uu[31] &= 127;                        /* RFC 7748: إخفاء أعلى بت في u إلزامي */
+  uu[31] &= 127;
   fe x1, x2, z2, x3, z3, a, aa, b, bb, e, c, d, da, cb, t0, t1;
   fe_frombytes(x1, uu);
   fe_one(x2); fe_zero(z2); fe_copy(x3, x1); fe_one(z3);
@@ -210,16 +210,16 @@ static void x25519_core(uint8_t out[32], const uint8_t k[32], const uint8_t u[32
     fe_mul(t0, fe_a24, e); fe_add(t1, aa, t0); fe_mul(z2, e, t1);
   }
   fe_cswap(x2, x3, swap); fe_cswap(z2, z3, swap);
-  fe_invert(z2, z2);                    /* z2^(p-2) */
+  fe_invert(z2, z2);
   fe_mul(x2, x2, z2);
   fe_tobytes(out, x2);
 }
 
-/* --- منحنى Ed25519: جمع موحّد (a = -1) بصيغة RFC 8032 المرجعية --- */
+
 static void ge_identity(ge *r) { fe_zero(r->X); fe_one(r->Y); fe_one(r->Z); fe_zero(r->T); }
 static void ge_copy(ge *d, const ge *s) { *d = *s; }
-/* جمع كامل يصلح للمضاعفة أيضاً: A=(Y1-X1)(Y2-X2) B=(Y1+X1)(Y2+X2)
-   C=T1·T2·d2 D=2·Z1·Z2 E=B-A F=D-C G=D+C H=B+A */
+
+
 static void ge_add(ge *r, const ge *p, const ge *q) {
   fe A, B, C, D, E, F, G, H, t0, t1;
   fe_sub(t0, p->Y, p->X); fe_sub(t1, q->Y, q->X); fe_mul(A, t0, t1);
@@ -229,7 +229,7 @@ static void ge_add(ge *r, const ge *p, const ge *q) {
   fe_sub(E, B, A); fe_sub(F, D, C); fe_add(G, D, C); fe_add(H, B, A);
   fe_mul(r->X, E, F); fe_mul(r->Y, G, H); fe_mul(r->T, E, H); fe_mul(r->Z, F, G);
 }
-/* ضرب عددي LSB-first كمرجع RFC 8032 (s: 32 بايت صغرية) */
+
 static void ge_mul(ge *r, const uint8_t s[32], const ge *p) {
   ge acc, q; ge_identity(&acc); ge_copy(&q, p);
   int top = 255;
@@ -240,7 +240,7 @@ static void ge_mul(ge *r, const uint8_t s[32], const ge *p) {
   }
   ge_copy(r, &acc);
 }
-/* ضغط: y صغرية مع بت التوازي في أعلى بت */
+
 static void ge_compress(uint8_t out[32], const ge *p) {
   fe zi, x, y;
   fe_invert(zi, p->Z);
@@ -249,36 +249,36 @@ static void ge_compress(uint8_t out[32], const ge *p) {
   fe_tobytes(out, y);
   out[31] |= (uint8_t)(fe_parity(x) << 7);
 }
-/* فك ضغط: x = u·v³·(u·v⁷)^((p-5)/8) مع تحقق v·x² = ±u وإصلاح بـ sqrt(-1) */
+
 static bool ge_decompress(ge *r, const uint8_t in[32]) {
   fe y, y2, u, v, v2, v3, v4, v7, uv7, x, t, d1, d2, one;
   int sign = in[31] >> 7;
   fe_frombytes(y, in);
-  y[15] &= 0x7FFF;                      /* إخفاء بت الإشارة (أعلى بت) */
-  if (!fe_canon(y)) return false;       /* y ≥ p: رفض */
+  y[15] &= 0x7FFF;
+  if (!fe_canon(y)) return false;
   fe_one(one);
   fe_sqr(y2, y);
-  fe_sub(u, y2, one);                   /* u = y² - 1 */
-  fe_mul(v, y2, fe_d); fe_add(v, v, one);   /* v = d·y² + 1 */
+  fe_sub(u, y2, one);
+  fe_mul(v, y2, fe_d); fe_add(v, v, one);
   if (fe_iszero(u)) {
-    if (sign) return false;             /* x = 0 زوجي فقط */
+    if (sign) return false;
     fe_zero(r->X); fe_copy(r->Y, y); fe_one(r->Z); fe_zero(r->T);
     return true;
   }
-  fe_sqr(v2, v);                        /* v² */
-  fe_mul(v3, v2, v);                    /* v³ */
-  fe_mul(v4, v2, v2);                   /* v⁴ */
-  fe_mul(v7, v4, v3);                   /* v⁷ */
+  fe_sqr(v2, v);
+  fe_mul(v3, v2, v);
+  fe_mul(v4, v2, v2);
+  fe_mul(v7, v4, v3);
   fe_mul(uv7, u, v7);
   fe_pow(x, uv7, fe_exp_p58);
   fe_mul(x, x, u);
   fe_mul(x, x, v3);
-  fe_sqr(t, x); fe_mul(t, t, v);        /* t = v·x² */
+  fe_sqr(t, x); fe_mul(t, t, v);
   fe_sub(d1, t, u);
   if (!fe_iszero(d1)) {
     fe_add(d2, t, u);
-    if (!fe_iszero(d2)) return false;   /* ليست مربعا: رفض */
-    fe_mul(x, x, fe_sqrtm1);            /* v·x² = -u → x × sqrt(-1) */
+    if (!fe_iszero(d2)) return false;
+    fe_mul(x, x, fe_sqrtm1);
   }
   if (fe_parity(x) != sign) fe_neg(x, x);
   fe_mul(r->T, x, y);
@@ -286,7 +286,7 @@ static bool ge_decompress(ge *r, const uint8_t in[32]) {
   return true;
 }
 
-/* --- اختزال mod-L بت-بت: r = 2r + بت ثم طرح شرطي (r < L دائماً) --- */
+
 static const uint8_t sc_L[32] = {0xed,0xd3,0xf5,0x5c,0x1a,0x63,0x12,0x58,0xd6,0x9c,0xf7,0xa2,0xde,0xf9,0xde,0x14,
                                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x10};
 static void sc_reduce(uint8_t out[32], const uint8_t in[64]) {
@@ -295,14 +295,14 @@ static void sc_reduce(uint8_t out[32], const uint8_t in[64]) {
   for (int i = 511; i >= 0; i--) {
     int carry = (in[i >> 3] >> (i & 7)) & 1;
     for (int j = 0; j < 32; j++) { int v = r[j] * 2 + carry; r[j] = (uint8_t)(v & 0xFF); carry = v >> 8; }
-    /* carry = 0 دائماً لأن r < L ⇒ 2r+1 < 2L < 2^256 */
+
     int br = 0;
     for (int j = 0; j < 32; j++) { int v = r[j] - sc_L[j] - br; if (v < 0) { v += 256; br = 1; } else br = 0; t[j] = (uint8_t)v; }
     if (!br) memcpy(r, t, 32);
   }
   memcpy(out, r, 32);
 }
-/* (a·b + c) mod L — ضرب مدرسي 32×32 ثم اختزال */
+
 static void sc_muladd(uint8_t out[32], const uint8_t a[32], const uint8_t b[32], const uint8_t c[32]) {
   int64_t t[64];
   memset(t, 0, sizeof(t));
@@ -319,11 +319,11 @@ static void sc_muladd(uint8_t out[32], const uint8_t a[32], const uint8_t b[32],
 }
 static bool sc_lt_L(const uint8_t s[32]) {
   for (int i = 31; i >= 0; i--) if (s[i] != sc_L[i]) return s[i] < sc_L[i];
-  return false;                          /* s = L: ليس أصغر */
+  return false;
 }
 
-/* --- Ed25519 --- */
-/* توسيع السر: a = تقييد(h[0..31]) و prefix = h[32..63] */
+
+
 static void ed_expand(const uint8_t seed[32], uint8_t a[32], uint8_t prefix[32]) {
   uint8_t h[64];
   sha512_raw(seed, 32, h);
@@ -341,12 +341,12 @@ static void ed_sign(uint8_t sig[64], const uint8_t seed[32], const uint8_t *msg,
   sha512_cat(rh, prefix, 32, msg, mlen, NULL, 0);
   sc_reduce(r, rh);
   ge R; ge_mul(&R, r, &fe_base);
-  ge_compress(sig, &R);                  /* sig[0..31] = R */
+  ge_compress(sig, &R);
   sha512_cat(kh, sig, 32, pk, 32, msg, mlen);
   sc_reduce(k, kh);
-  sc_muladd(sig + 32, k, a, r);          /* S = (r + k·a) mod L */
+  sc_muladd(sig + 32, k, a, r);
 }
-/* التحقق: [S]B = R + [k]A بلا عامل التجميع (يكفي وفق RFC 8032) + رفض S ≥ L */
+
 static bool ed_verify(const uint8_t pk[32], const uint8_t *msg, size_t mlen, const uint8_t sig[64]) {
   if (!sc_lt_L(sig + 32)) return false;
   ge A, R;
@@ -364,8 +364,8 @@ static bool ed_verify(const uint8_t pk[32], const uint8_t *msg, size_t mlen, con
   return memcmp(e1, e2, 32) == 0;
 }
 
-/* تهيئة الثوابت: d = -121665·inv(121666) ، sqrt(-1) = 2^((p-1)/4) ،
-   نقطة الأساس y = 4·inv(5) مع x زوجي (عبر فك ضغط بت إشارة 0) */
+
+
 static void crv_init(void) {
   if (crv_ready) return;
   crv_ready = 1;
@@ -383,12 +383,12 @@ static void crv_init(void) {
   fe_small(fe_a24, 121665);
   fe_pow(fe_sqrtm1, two, fe_exp_p14);
   fe_invert(inv, five);
-  fe_mul(four, four, inv);               /* y = 4/5 */
-  uint8_t yb[32]; fe_tobytes(yb, four);  /* بت الإشارة 0 تلقائياً */
+  fe_mul(four, four, inv);
+  uint8_t yb[32]; fe_tobytes(yb, four);
   ge_decompress(&fe_base, yb);
 }
 
-/* --- الدوال الأصلية --- */
+
 static bool crv_getN(Value v, uint8_t *out, int n) {
   if (!IS_T(v, O_STR)) return false;
   Str *s = AS_STR(v);

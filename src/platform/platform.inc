@@ -191,7 +191,7 @@ static int os_rm_file(const char *p) { return unlink(p); }
 #ifndef SIGCHLD
 #define SIGCHLD 17
 #endif
-/* strcasestr غير موجودة على ويندوز */
+
 static char *w_strcasestr(const char *h, const char *n) {
   if (!n || !*n) return (char *)h;
   size_t nl = strlen(n);
@@ -493,9 +493,9 @@ static int os_mkstemp(char *tmpl) {
   wchar_t *w = w_utf16(tmpl); int fd = _wopen(w, _O_RDWR | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE); free(w); return fd;
 }
 static void os_ignore_sigpipe(void) {}
-/* تهيئة WinSock مبكراً: بعض المسارات (مثل getaddrinfo في جلب HTTP) لا تمر عبر w_socket */
+
 static void os_early_wsa(void) { w_wsa(); }
-/* تعويض mallopt الخاص بلينكس + تحسين كومة الذاكرة على ويندوز (كومة منخفضة التجزؤ) */
+
 #define mallopt(a, b) ((void)(a), (void)(b))
 #ifndef M_MMAP_THRESHOLD
 #define M_MMAP_THRESHOLD 0
@@ -504,7 +504,7 @@ static void os_early_wsa(void) { w_wsa(); }
 #define M_TRIM_THRESHOLD 0
 #endif
 static void os_heap_tune(void) {
-  ULONG info = 2; /* HeapCompatibilityInformation: LFH */
+  ULONG info = 2;
   HeapSetInformation(GetProcessHeap(), HeapCompatibilityInformation, &info, sizeof info);
 }
 static void os_console_init(void) {
@@ -524,7 +524,7 @@ static const char *os_devtty(void) { return "CONIN$"; }
 static bool os_is_abs(const char *p) { return p[0] == '/' || p[0] == '\\' || (((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':'); }
 static const char *os_name(void) { return "windows"; }
 
-/* --- طبقة توافق ذاكرة الكود التنفيذي للويندوز (للـ JIT) --- */
+
 #ifndef MAP_FAILED
 #define MAP_FAILED ((void *)-1)
 #endif
@@ -578,7 +578,7 @@ static const char *solan_strptime(const char *s, const char *f, struct tm *tm) {
 }
 #endif
 
-/* ============ تشغيل أمر متقدم (دخل + مهلة + خطأ منفصل) ============ */
+
 static long ex_now_ms(void) {
 #if SOLAN_WIN
   return (long)GetTickCount();
@@ -587,9 +587,9 @@ static long ex_now_ms(void) {
   return (long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 #endif
 }
-/* يشغّل الأمر عبر sh -c (يونكس) أو cmd /c (ويندوز).
-   يعيد رمز الخروج، أو -1 عند فشل التشغيل، أو -2 عند انتهاء المهلة (بعد قتل العملية).
-   out/err إن لم تكن NULL تُستقبل النص الملتقط (مخصص بـ malloc). */
+
+
+
 static int os_run_ex(const char *cmd, const char *cwd, const char *in, size_t inn, int tmo_ms,
                      char **out, size_t *outn, char **err, size_t *errn) {
 #if SOLAN_WIN
@@ -617,7 +617,7 @@ static int os_run_ex(const char *cmd, const char *cwd, const char *in, size_t in
     if (out) { *out = (char *)calloc(1, 1); if (outn) *outn = 0; }
     if (err) { *err = (char *)calloc(1, 1); if (errn) *errn = 0; }
     return -1; }
-  /* كتابة الدخل ثم إغلاق الطرف ليصل EOF للابن */
+
   if (in && inn) { DWORD wrote = 0; WriteFile(in_w, in, (DWORD)inn, &wrote, NULL); }
   CloseHandle(in_w);
   size_t co = 0, capo = 4096, ce = 0, cape = 4096;

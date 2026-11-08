@@ -51,7 +51,7 @@ JSON="$($FETCH "https://api.github.com/repos/$REPO/releases/latest")" || {
   echo "  https://github.com/$REPO/releases"
   exit 1
 }
-URL="$(printf '%s\n' "$JSON" | grep '"browser_download_url"' | grep "$PAT" | head -n1 | sed 's/.*"\(https[^"]*\)".*/\1/')"
+URL="$(printf '%s\n' "$JSON" | grep '"browser_download_url"' | grep "$PAT" | head -n1 | sed 's/.*"\(http[^"]*\)".*/\1/')"
 [ -n "$URL" ] || {
   echo "لم أجد ملفاً جاهزاً ($PAT) في أحدث إصدار. نزّل يدوياً من:"
   echo "  https://github.com/$REPO/releases"

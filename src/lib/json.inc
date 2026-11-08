@@ -38,7 +38,7 @@ static void jws(JP *j) { while (j->p < j->end && (*j->p == ' ' || *j->p == '\n' 
 static Value jval(JP *j, int depth);
 static Value jstr(JP *j) {
   j->p++;
-  /* مسار سريع: نص بلا تهريب → نسخة مباشرة بلا Buf وبدل بايت-ببايت */
+
   {
     const char *q = j->p;
     while (q < j->end) { char c = *q; if (c == '"' || c == '\\') break; q++; }
@@ -63,7 +63,7 @@ static Value jstr(JP *j) {
       }
       j->p++;
     } else {
-      /* نسخ الجرعة حتى التهريب أو نهاية النص دفعة واحدة */
+
       const char *q = j->p;
       while (q < j->end && *q != '"' && *q != '\\') q++;
       buf_add(&b, j->p, (int)(q - j->p)); j->p = q;
@@ -104,7 +104,7 @@ static Value jval(JP *j, int depth) {
   if (j->end - j->p >= 5 && !strncmp(j->p, "false", 5)) { j->p += 5; return BOOLV(false); }
   if (j->end - j->p >= 4 && !strncmp(j->p, "null", 4)) { j->p += 4; return NIL; }
   if (c == '-' || (c >= '0' && c <= '9')) {
-    /* مسار سريع: أعداد بلا أس ≤15 خانة — صحيح مضاعف الدقة + قسمة واحدة، بلا strtod */
+
     const char *q = j->p; bool neg = (*q == '-'); if (neg) q++;
     if (q < j->end && *q >= '0' && *q <= '9') {
       unsigned long long m = 0; const char *d0 = q; int frac = 0; bool dot = false, ok = true;
@@ -114,12 +114,12 @@ static Value jval(JP *j, int depth) {
         else if (ch == '.' && !dot) { dot = true; q++; }
         else break;
       }
-      if (q - d0 > 15) ok = false; /* أكثر من 15 خانة قد يفقد دقة المضاعف */
+      if (q - d0 > 15) ok = false;
       if (ok && q < j->end && (*q == 'e' || *q == 'E')) ok = false;
       if (ok) {
         static const double p10[16] = { 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000,
           1000000000, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15 };
-        double v = frac ? (double)m / p10[frac] : (double)m; /* قسمة صحيحة التدوير = أقرب مضاعف للقيمة العشرية */
+        double v = frac ? (double)m / p10[frac] : (double)m;
         j->p = q; return NUMV(neg ? -v : v);
       }
     }
@@ -134,7 +134,7 @@ NAT(j_dec) {
 
 static void shq(Buf *b, const char *s, int n) {
 #if SOLAN_WIN
-  /* cmd.exe لا يفهم الاقتباس المفرد — نستخدم المزدوج مع تهريب الداخلي */
+
   buf_addc(b, '"');
   for (int i = 0; i < n; i++) { if (s[i] == '"') buf_add(b, "\\\"", 2); else buf_addc(b, s[i]); }
   buf_addc(b, '"');

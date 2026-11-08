@@ -4,7 +4,7 @@
 #define JIT_MAX_DEOPT 200
 #if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
 #include <pthread.h>
-extern void pthread_jit_write_protect_np(int) __attribute__((weak_import)); /* ماك 11.3+ فقط — يُفحص وجوده وقت التشغيل */
+extern void pthread_jit_write_protect_np(int) __attribute__((weak_import));
 #endif
 
 typedef struct JitCtx { Value *slots; Value *sp; Closure *clo; const uint8_t *ip; int code; } JitCtx;
@@ -36,15 +36,15 @@ static void jit_free_regions(Fun *f) {
 #define TMP_LO 3
 #define TMP_HI 7
 #define VAR_LO 8
-/* مساحة الحفظ تُعرَّف داخل jit_compile حسب المنصة (JX_SAVE_AREA) */
 
-/* pf: مجمع ثوابت المستدعى المُدرج (NULL = ثوابت المنطقة) — rd: فهرس تعليمة إعادة توجيه التخفي (-1 = بلا) */
+
+
 typedef struct { const uint8_t *ip; uint8_t op; int a, b, c; int len; int tgt; const uint8_t *tip; Fun *pf; int rd; } JI;
 typedef struct { int pos, lab; } JF;
 typedef struct { const uint8_t *ip; int depth; int lab; int code; } JX;
 enum { SK_MEM, SK_XMM, SK_VAR, SK_CONST, SK_HOME };
 typedef struct { uint8_t k, r, n; int8_t hb; int hd; int var; uint64_t bits; } SD;
-typedef struct { int g, idx, gi, uses, ok, reg, noc; } PV; /* noc: سلوت مُنشأ داخل المنطقة — بلا فحص وسم عند الدخول */
+typedef struct { int g, idx, gi, uses, ok, reg, noc; } PV;
 typedef struct { int lab, n; SD *s; const uint8_t *ip; } JS;
 
 typedef struct {
@@ -54,8 +54,8 @@ typedef struct {
   XB x; int lpos[JMAXLAB]; int nlab; JF fix[JMAXFIX]; int nfix;
   JX ex[JMAXI * 2]; int nex;
   int dl[JMAXI];
-  Str *gnames[JMAXV]; int ggi[JMAXV]; Closure *gexp[JMAXV]; int ng; /* gexp: قيمة عام متوقعة لمستدعٍ مُدرج (NULL = بلا حراسة قيمة) */
-  int nbi; int ggen; /* nbi: مواقع قراءة عام مدمج (تحتاج R13)؛ ggen: جيل قاموس العوالم عند الترجمة */
+  Str *gnames[JMAXV]; int ggi[JMAXV]; Closure *gexp[JMAXV]; int ng;
+  int nbi; int ggen;
   JS *sx; int nsx, csx;
   PV pv[64]; int npv; int usepromo; int spoff;
   SD sd[JMAXD + 8];
@@ -73,21 +73,21 @@ static double jit_h_mod(double a, double b) {
 }
 static double jit_h_pow(double a, double b) { return sol_pow(a, b); }
 
-/* مساعد call-out لـ OP_CALL: ينفّذ الاستدعاءَ غير القابل للإدراج عبر آلية المفسّر كاملةً
-   ثم تعود المنطقة للعمل. vm.sp = قمة المكدس عند الاستدعاء (تحت المنطقة كلها مُفرَّغة مسبقاً).
-   عند الفشل يضبط code=2 (استثناء: vm.exc مضبوط والآلة متسقة تحت sp) بلا تفريغ سجلات. */
+
+
+
 static Value *jit_h_call(JitCtx *cx, Value *sp, int argc, const uint8_t *call_ip) {
   vm.sp = sp;
-  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)call_ip; /* أسطر الأخطاء داخل call_value تشير لموقع الاستدعاء */
+  vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)call_ip;
   if (vm.gc_pending) collect();
   if (!call_sync(argc)) cx->code = 2;
   return vm.sp;
 }
 
-/* مساعدات الفهرسة العامة: خرائط/سلاسل/كائنات — عبر دوال المفسّر نفسها (get_index/set_index/get_prop).
-   القيم تُقرأ من المكدس الحقيقي فوق القمة: GET [o,ix]، SET [o,ix,v]، PROP [o].
-   عند النجاح يُعدَّل المكدس بدلالة المفسّر ويُعاد مؤشر القمة الجديد؛ عند استثناء
-   يُضبط code=2 (vm.exc مضبوط وvm.sp متسق وip الإطار يشير للتعليمة لأسطر الأخطاء). */
+
+
+
+
 static Value *jit_h_index_get(JitCtx *cx, Value *sp, const uint8_t *ip) {
   vm.sp = sp;
   vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)ip;
@@ -101,7 +101,7 @@ static Value *jit_h_index_set(JitCtx *cx, Value *sp, const uint8_t *ip) {
   vm.frames[vm.fcount - 1].ip = (uint8_t *)(uintptr_t)ip;
   if (vm.gc_pending) collect();
   if (set_index(sp[-3], sp[-2], sp[-1])) { cx->code = 2; return sp; }
-  sp[-3] = sp[-1]; vm.sp = sp - 2; return sp - 2; /* قيمة التعبير تبقى عند القمة الجديدة */
+  sp[-3] = sp[-1]; vm.sp = sp - 2; return sp - 2;
 }
 static Value *jit_h_prop_get(JitCtx *cx, Value *sp, Str *name, const uint8_t *ip) {
   vm.sp = sp;
@@ -118,7 +118,7 @@ static void jc_fixup(JC *c, int l) {
   if (c->nfix >= JMAXFIX) { c->failed = 1; c->why = "fixups"; return; }
   c->fix[c->nfix].pos = c->x.n; c->fix[c->nfix].lab = l; c->nfix++;
 #if JX_ARM
-  /* التعليمة نفسها (4 بايت صادرة للتو) هي العنصر النائب — حلقة الترقيع تعدّل حقولها */
+
 #else
   xb_u32(&c->x, 0);
 #endif
@@ -138,7 +138,7 @@ static int sd_eq(const SD *a, const SD *b) {
 static int jc_deopt(JC *c, int i, int depth) {
   JI *in = &c->ins[i];
   const uint8_t *sip = in->ip; int sdep = depth;
-  if (in->rd >= 0) { sip = c->ins[in->rd].ip; sdep = c->depth[in->rd]; } /* تعليمات جسم مُدرج: تُخفي إلى ip/عمق الاستدعاء الأصلي */
+  if (in->rd >= 0) { sip = c->ins[in->rd].ip; sdep = c->depth[in->rd]; }
   if (c->dl[i] >= 0) {
     JS *o = &c->sx[c->dl[i]]; int same = o->n == sdep;
     for (int k = 0; same && k < sdep; k++) if (!sd_eq(&o->s[k], &c->sd[k])) same = 0;
@@ -180,8 +180,8 @@ static int jc_effect(JC *c, JI *in, int *pop, int *push) {
     case OP_FOREACH: *push = in->b; return 1;
     case OP_RFOREP: *pop = 0; return 1;
     case OP_RFOR: *push = in->c; return 1;
-    case OP_CALL: *pop = in->a + 1; *push = 1; return 1; /* المستدعى + الوسائط ← النتيجة */
-    case OP_JMOVE: *pop = in->a + 1; *push = 1; return 1; /* انهيار إطار مُدرج: انسخ القمة إلى d-1-k */
+    case OP_CALL: *pop = in->a + 1; *push = 1; return 1;
+    case OP_JMOVE: *pop = in->a + 1; *push = 1; return 1;
     default: (void)c; return 0;
   }
 }
@@ -196,7 +196,7 @@ static int jc_analyze(JC *c) {
   c->n = 0;
   while (ip < c->tail) {
     if (c->n >= JMAXI) return 0;
-    JI *in = &c->ins[c->n]; in->ip = ip; in->op = op_norm(*ip); in->len = 1 + op_operand_len(c->fn, ip); in->tgt = -1; in->tip = NULL; in->rd = -1; /* calloc يتركه 0 — بلا هذا يُعاد كل تخفي إلى ins[0] */
+    JI *in = &c->ins[c->n]; in->ip = ip; in->op = op_norm(*ip); in->len = 1 + op_operand_len(c->fn, ip); in->tgt = -1; in->tip = NULL; in->rd = -1;
     const uint8_t *ar = ip + 1;
     in->a = in->b = in->c = 0;
     switch ((Op)in->op) {
@@ -219,7 +219,7 @@ static int jc_analyze(JC *c) {
   return jc_flow(c);
 }
 
-/* جولة التدفق: أهداف القفز + أعماق المكدس — تُعاد تشغيلها بعد إدراج الأجسام */
+
 static int jc_flow(JC *c) {
   for (int i = 0; i < c->n; i++) c->islabel[i] = 0;
   for (int i = 0; i < c->n; i++) {
@@ -249,7 +249,7 @@ static int jc_flow(JC *c) {
         if (i + 1 < c->n) { succ[ns] = i + 1; sd[ns++] = nd; }
         if (in->tgt >= 0) { succ[ns] = in->tgt; sd[ns++] = d; }
         break;
-      case OP_RFOR: /* خروج الحلقة الشرطي قد يقع داخل المنطقة (حلقة متداخلة): عمقه = عمق الدخول بلا دفع قيم الحلقة */
+      case OP_RFOR:
         if (i + 1 < c->n) { succ[ns] = i + 1; sd[ns++] = nd; }
         if (in->tgt >= 0) { succ[ns] = in->tgt; sd[ns++] = d; }
         break;
@@ -264,11 +264,11 @@ static int jc_flow(JC *c) {
   return 1;
 }
 
-/* ═══════ إدراج أجسام الدوال (inlining) ═══════
-   يستبدل الاستدعاء المباشر لدالة عامة معروفة بجسمها المفكوك فوق الوسائط في مكانها، ثم ينهار
-   المكدس بـ OP_JMOVE. حارس هوية المستدعى (وسم V_OBJ + مؤشر الـ Closure المتوقع) يُرفع إلى
-   مقدمة المنطقة، والمرجع يُثبَّت في vm.pins لمنع إعادة استخدام العنوان (ABA). التخفي داخل
-   الجسم يُعاد توجيهه إلى ip/عمق الاستدعاء الأصلي عبر rd — فيستأنف المفسّر الاستدعاء كما هو. */
+
+
+
+
+
 typedef struct { const uint8_t *ip; uint8_t op; int a; uint8_t len; } BOP;
 typedef struct { int ic, d0, argc, blen, b; Fun *pf; BOP *bp; } ISITE;
 #define JMAXSITE 64
@@ -290,7 +290,7 @@ static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *bl
     }
     if (op == OP_RETURN) {
       if (bd < 1) { rej = "رجع بلا قيمة"; goto fail; }
-      b = bd; break; /* ما بعد أول رجع غير قابل للوصول (لا قفزات في الجسم) — كالنمط الضمني NIL/RETURN */
+      b = bd; break;
     }
     switch (op) {
       case OP_CONST: {
@@ -299,20 +299,20 @@ static int jc_inline_walk(JC *c, Fun *pf, int argc, int D_call, BOP *bp, int *bl
         if (!IS_NUM(v) && !IS_T(v, O_STR)) { rej = "ثابت ليس رقماً/نصاً"; goto fail; }
         bd++; break;
       }
-      case OP_GET_LOCAL: if (a < 1 || a > argc) { rej = "محلي خارج الوسائط"; goto fail; } bd++; break; /* الوسائط فقط: 0 = المستدعى نفسه مرفوض */
+      case OP_GET_LOCAL: if (a < 1 || a > argc) { rej = "محلي خارج الوسائط"; goto fail; } bd++; break;
       case OP_TRUE: case OP_FALSE: case OP_NIL: case OP_DUP: bd++; break;
       case OP_GET_GLOBAL: {
         if (a >= pf->ch.consts.n || !IS_T(pf->ch.consts.v[a], O_STR)) { rej = "اسم عام غير نصي"; goto fail; }
         Str *nm = AS_STR(pf->ch.consts.v[a]);
-        /* عام الجسم يُقبل إن وُجد في عوالم المنطقة أو كان مدمجاً — تعليمته تمرّ بحالة
-           OP_GET_GLOBAL الرئيسية فتُرقّى أو تُقرأ حديثاً من vm.builtins بحارس الظل */
+
+
         if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) < 0 &&
             dfind(&vm.builtins, OBJV(nm), nm->hash) < 0) { rej = "عام غير معرف بعد"; goto fail; }
         bd++; break;
       }
-      case OP_CALL: { /* استدعاء داخل الجسم (مدمج غالباً): يُنفَّذ call-out عبر حالة OP_CALL الرئيسية */
+      case OP_CALL: {
         if (bd < a + 1) { rej = "مكدس سالب"; goto fail; }
-        bd -= a; break; /* المستدعى + الوسائط تُستبدل بالنتيجة */
+        bd -= a; break;
       }
       case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV:
       case OP_EQ: case OP_LT: case OP_LE: case OP_GT: case OP_GE:
@@ -341,7 +341,7 @@ static void jc_inline(JC *c) {
   Value *kc = c->fn->ch.consts.v;
   Dict *gd = &c->clo->globals->d;
   const char *rej = NULL; int ric = -1;
-  /* جولة الفحص: كل المواقع تُدقَّق على المصفوفة الأصلية قبل أي تحريف */
+
   for (int ic = 0; ic < c->n; ic++) {
     if (ns >= JMAXSITE || nbo + JMAXBODY > JMAXSITE * JMAXBODY) break;
     JI *in = &c->ins[ic];
@@ -354,7 +354,7 @@ static void jc_inline(JC *c) {
     if (rej) goto rejlog;
     int argc = in->a, D = c->depth[ic], d0 = D - argc - 1;
     if (d0 < 0) { rej = "عمق سالب"; goto rejlog; }
-    int j = -1; /* دفع المستدعى: أقرب تعليمة سابقة عند العمق d0 */
+    int j = -1;
     for (int q = ic - 1; q >= 0; q--) {
       int dq = c->depth[q];
       if (dq == d0) { j = q; break; }
@@ -371,7 +371,7 @@ static void jc_inline(JC *c) {
     if (!IS_T(gv, O_CLO)) { rej = "ليس دالة"; goto rejlog; }
     Fun *pf = AS_CLO(gv)->f;
     if (!pf || pf->variadic || pf->kind || pf->arity != argc || pf == c->fn) { rej = "توقيع غير مطابق"; goto rejlog; }
-    int dirty = 0; /* لا كتابة لهذا العام داخل المنطقة — وإلا ينكار حارس الهوية أثناء التنفيذ */
+    int dirty = 0;
     for (int q = 0; q < c->n && !dirty; q++) {
       JI *w = &c->ins[q];
       if (w->op == OP_SET_GLOBAL) { if (w->a < c->fn->ch.consts.n && IS_T(kc[w->a], O_STR) && AS_STR(kc[w->a]) == nm) dirty = 1; }
@@ -384,7 +384,7 @@ static void jc_inline(JC *c) {
     BOP *bp = &bops[nbo];
     int blen = 0, b = 0;
     if (!jc_inline_walk(c, pf, argc, D, bp, &blen, &b)) { rej = "جسم غير مؤهل"; goto rejlog; }
-    int slot = -1; /* تسجيل اسم المستدعى + القيمة المتوقعة + تثبيت المرجع ضد الـ GC */
+    int slot = -1;
     for (int q = 0; q < c->ng; q++) if (c->gnames[q] == nm) { slot = q; break; }
     if (slot < 0) {
       jc_global_index(c, nm);
@@ -401,7 +401,7 @@ static void jc_inline(JC *c) {
     if (g_jit_trace) fprintf(stderr, "[inline] رفض ic=%d عمق=%d: %s\n", ric, c->depth[ric], rej);
   }
   if (ns == 0 || c->n + add >= JMAXI) return;
-  /* جولة الإدراج: تصاعدياً؛ كل إدراج يزيح مواقع المواقع الأعلى غير المعالجة فقط */
+
   for (int s = 0; s < ns; s++) {
     int ic = st[s].ic, blen = st[s].blen, argc = st[s].argc, b = st[s].b;
     Fun *pf = st[s].pf;
@@ -411,9 +411,9 @@ static void jc_inline(JC *c) {
     for (int k = 0; k < blen; k++) {
       BOP *bo = &st[s].bp[k];
       JI *ni = &c->ins[ic + k];
-      ni->ip = k == 0 ? call_ip : bo->ip; /* الأولى تحمل ip الاستدعاء: تخفيها الذاتي يصيب الموضع الصحيح */
+      ni->ip = k == 0 ? call_ip : bo->ip;
       ni->op = bo->op;
-      /* ترجمة الوسيط: محلي الجسم a (1..argc) هو الوسيط a في عمق المتصل d0+a → سلوت مطلق spoff+d0+a */
+
       ni->a = bo->op == OP_GET_LOCAL ? bo->a + c->spoff + st[s].d0 : bo->a;
       ni->b = 0; ni->c = 0; ni->len = bo->len;
       ni->tgt = -1; ni->tip = NULL;
@@ -426,7 +426,7 @@ static void jc_inline(JC *c) {
     for (int t = s + 1; t < ns; t++) st[t].ic += blen;
     c->ninl++;
   }
-  /* إعادة بناء idx_of ثم جولة تدفق جديدة على التسلسل المُدرج */
+
   for (int i = 0; i < (int)(c->tail - c->head) + 1; i++) c->idx_of[i] = -1;
   for (int i = 0; i < c->n; i++) { const uint8_t *p = c->ins[i].ip; if (p >= c->head && p < c->tail) c->idx_of[p - c->head] = i; }
   if (!jc_flow(c)) { c->failed = 1; c->why = "flow2"; }
@@ -450,9 +450,9 @@ static int jc_pool(JC *c, uint64_t bits) {
 static void jc_rip(JC *c, int pfx, int op, int reg, int lab) {
   XB *x = &c->x;
 #if JX_ARM
-  /* تحميل ثابت من البركة: LDR literal (imm19 عنصر نائب تُرقَّعه حلقة الترقيع) */
-  if (op == 0x0F10) jx_emit(x, 0x5C000000u | (uint32_t)reg); /* ldr d{reg}, lit */
-  else { jx_emit(x, 0x5C000000u | 16u); jx_sse_rr(x, pfx, op, reg, 16); } /* ldr d16, lit ثم العملية */
+
+  if (op == 0x0F10) jx_emit(x, 0x5C000000u | (uint32_t)reg);
+  else { jx_emit(x, 0x5C000000u | 16u); jx_sse_rr(x, pfx, op, reg, 16); }
   jc_fixup(c, lab);
 #else
   if (pfx) xb_b(x, pfx);
@@ -540,9 +540,9 @@ static void jc_flush_vars(JC *c) {
   for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); jx_movsd_mr(&c->x, b, d + 8, c->pv[k].reg); }
 }
 #if JX_ARM
-/* d0-d2 مخطوطات صرفة، d3-d7 مؤقتات/متغيرات caller-saved تُنقذ حول المساعدين،
-   d8-d15 محفوظة-للمستدعى أصلاً فلا حاجة لنقذها هنا (البرولوج ينقذها للمستدعى الأعلى).
-   منطقة الإطار [16..55] مخصصة لهذا الغرض (انظر البرولوج). */
+
+
+
 static void jc_save_regs(JC *c) { for (int r = 3; r <= 7; r++) jx_movsd_mr(&c->x, RSP, 16 + (r - 3) * 8, r); }
 static void jc_restore_regs(JC *c) { for (int r = 3; r <= 7; r++) jx_movsd_rm(&c->x, r, RSP, 16 + (r - 3) * 8); }
 #else
@@ -552,10 +552,10 @@ static void jc_restore_regs(JC *c) { for (int r = 3; r <= 15; r++) jx_movsd_rm(&
 static void jc_call_helper(JC *c, void *fn) {
   jc_save_regs(c);
 #if JX_ARM
-  jx_ldi64(&c->x, 15, (uint64_t)(uintptr_t)fn); /* x15 = عنوان المساعد (عابرة، لا x16/x17 المحجوزتين للقشور) */
-  jx_blr(&c->x, 15); /* sp متحاذى 16 أصلاً (الإطار 160) — لا مساحة ظل على ARM */
+  jx_ldi64(&c->x, 15, (uint64_t)(uintptr_t)fn);
+  jx_blr(&c->x, 15);
 #elif JX_WIN
-  jx_sub_rsp(&c->x, 32); /* مساحة الظل التي يتوقعها المستدعى على ويندوز */
+  jx_sub_rsp(&c->x, 32);
   jx_mov_ri(&c->x, RAX, (uint64_t)(uintptr_t)fn); jx_call_rax(&c->x);
   jx_add_rsp(&c->x, 32);
 #else
@@ -564,19 +564,19 @@ static void jc_call_helper(JC *c, void *fn) {
   jc_restore_regs(c);
 }
 
-/* مسار الفهرسة العامة (الحامل ليس قائمة): canon + flush ثم مساعد C ينفذ العملية عبر
-   دوال المفسّر، ثم خروج للمفسّر من بعد التعليمة (بقية التكرار تكمل فيه). set: 0 قراءة / 1 كتابة.
-   ملاحظة: jc_canon يعدل c->sd — المتصل يحفظها ويستعيدها (المسار السريع يلتقي التعليمة التالية). */
+
+
+
 static void jc_index_callout(JC *c, int i, int d, int set) {
   XB *x = &c->x;
   jc_canon(c, 0, d);
   jc_flush_vars(c);
   JI *in = &c->ins[i];
   const uint8_t *rip = in->ip + in->len;
-  int ex2 = jc_exit_label2(c, in->ip, d, 2); /* استثناء: الاستئناف عند التعليمة يعيد رميه بالمفسّر نظيفاً */
+  int ex2 = jc_exit_label2(c, in->ip, d, 2);
   int ex0 = jc_exit_label2(c, rip, set ? d - 2 : d - 1, 0);
 #if JX_ARM
-  jx_mov_rr(x, RAX, R15); /* (cx, sp, ip) */
+  jx_mov_rr(x, RAX, R15);
   jx_lea(x, RCX, R12, -1, 0, d * 16);
   jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)in->ip);
 #elif JX_WIN
@@ -593,7 +593,7 @@ static void jc_index_callout(JC *c, int i, int d, int set) {
   jc_jmp(c, ex0);
 }
 
-/* مسار خاصية غير ".طول" (خرائط/كائنات/سلاسل): نفس بنية jc_index_callout مع اسم الخاصية */
+
 static void jc_prop_callout(JC *c, int i, int d, Str *name) {
   XB *x = &c->x;
   jc_canon(c, 0, d);
@@ -603,7 +603,7 @@ static void jc_prop_callout(JC *c, int i, int d, Str *name) {
   int ex2 = jc_exit_label2(c, in->ip, d, 2);
   int ex0 = jc_exit_label2(c, rip, d - 1, 0);
 #if JX_ARM
-  jx_mov_rr(x, RAX, R15); /* (cx, sp, name, ip) */
+  jx_mov_rr(x, RAX, R15);
   jx_lea(x, RCX, R12, -1, 0, d * 16);
   jx_mov_ri(x, RDX, (uint64_t)(uintptr_t)name);
   jx_mov_ri(x, RSI, (uint64_t)(uintptr_t)in->ip);
@@ -677,7 +677,7 @@ static int jc_fusable_pop(JC *c, int i) {
 }
 
 static void jc_list_ptr_lab(JC *c, int i, int d, int lp, int nlist) {
-  /* فحص الحامل كائن-قائمة؛ عند الفشل يقفز nlist (مسار الفهرسة العامة) بدل نقطة التخفي */
+
   XB *x = &c->x; SD *s = &c->sd[lp];
   if (s->k != SK_MEM && s->k != SK_HOME) { c->failed = 1; c->why = "listop"; return; }
   int b, dd; jc_mem_addr(c, lp, &b, &dd);
@@ -766,16 +766,16 @@ static void jc_mod(JC *c, int i, int d) {
     jx_xorpd(x, t, t); jc_jmp(c, done);
     jc_bind(c, k);
 #if JX_ARM
-    jx_sdiv32(x, RDX, RAX, RCX);      /* w2 = w0 / w1 (يقتطع كالـidiv تماماً) */
-    jx_msub32(x, RDX, RDX, RCX, RAX); /* w2 = w0 - w2*w1 = الباقي المقتطع */
+    jx_sdiv32(x, RDX, RAX, RCX);
+    jx_msub32(x, RDX, RDX, RCX, RAX);
 #else
     jx_cdq(x); jx_idiv32(x, RCX);
 #endif
     jx_test32_rr(x, RDX, RDX); jc_jcc(c, CC_E, res);
 #if JX_ARM
-    jx_alu32_rr(x, 0x89, RAX, RDX); /* mov */
-    jx_alu32_rr(x, 0x31, RAX, RCX); /* eor — على ARM لا يضبط الأعلام فنُعيد الفحص بـtst */
-    jx_test32_rr(x, RAX, RAX);      /* N = إشارة (rem ^ b) */
+    jx_alu32_rr(x, 0x89, RAX, RDX);
+    jx_alu32_rr(x, 0x31, RAX, RCX);
+    jx_test32_rr(x, RAX, RAX);
     jc_jcc(c, CC_NS, res);
 #else
     jx_alu32_rr(x, 0x89, RAX, RDX); jx_alu32_rr(x, 0x31, RAX, RCX); jc_jcc(c, CC_NS, res);
@@ -826,7 +826,7 @@ static void jc_store_bool_eax(JC *c, int pos) {
   c->sd[pos] = sd_mk(SK_MEM);
 }
 
-/* ثوابت التعليمة: ثوابت المستدعى المُدرج إن وُجد وإلا ثوابت المنطقة */
+
 static Value *jc_kc(JC *c, JI *in) { return (in->pf ? in->pf : c->fn)->ch.consts.v; }
 
 static void jc_promote(JC *c) {
@@ -839,7 +839,7 @@ static void jc_promote(JC *c) {
     JI *in = &c->ins[i]; int g, idx, gi = -1;
     if (in->op == OP_GET_LOCAL || in->op == OP_SET_LOCAL) { if (in->a >= c->spoff) continue; g = 0; idx = in->a; }
     else if (in->op == OP_GET_GLOBAL || in->op == OP_SET_GLOBAL) {
-      Str *nm = AS_STR(jc_kc(c, in)[in->a]); Dict *dd = &c->clo->globals->d; /* jc_kc: تعليمة مُدرجة تقرأ مسبار دالتها لا مسبار المنطقة */
+      Str *nm = AS_STR(jc_kc(c, in)[in->a]); Dict *dd = &c->clo->globals->d;
       gi = dfind(dd, OBJV(nm), nm->hash); if (gi < 0) continue; g = 1; idx = gi;
     } else continue;
     int f = -1; for (int k = 0; k < nc; k++) if (cand[k].g == g && cand[k].idx == idx) { f = k; break; }
@@ -848,16 +848,16 @@ static void jc_promote(JC *c) {
       cand[f].ok = IS_NUM(v); }
     cand[f].uses++;
   }
-  /* مرشحو حلقة المدى: آلية الحلقة (العدّاد/العدد/أ) بوسوم صحيحة من خارج المنطقة، ووجهات القيم (سلوتات تُنشأ داخلها — بلا فحص وسم عند الدخول) */
+
   for (int i = 0; i < c->n; i++) {
     if (!c->reach[i]) continue;
     JI *in = &c->ins[i];
     if (in->op != OP_RFOR) continue;
     int d = c->depth[i], base = in->a, flag = in->b, nvr = in->c;
     int mach[3], nm = 0;
-    mach[nm++] = flag ? base + 2 : base + 1; /* العدّاد */
-    mach[nm++] = flag ? base + 1 : base + 0; /* العدد */
-    if (flag) mach[nm++] = base;             /* أ */
+    mach[nm++] = flag ? base + 2 : base + 1;
+    mach[nm++] = flag ? base + 1 : base + 0;
+    if (flag) mach[nm++] = base;
     for (int m = 0; m < nm; m++) {
       int idx = mach[m], f = -1;
       for (int k = 0; k < nc; k++) if (!cand[k].g && cand[k].idx == idx) { f = k; break; }
@@ -865,9 +865,9 @@ static void jc_promote(JC *c) {
       cand[f].uses += 100;
     }
     for (int k = 0; k < nvr; k++) {
-      int idx = c->spoff + d + k, f = -1; /* العمق d+k يوافق السلوت المحلي spoff+d+k (R12 = RBX + spoff*16) */
-      /* وجهة لا تُقرأ في الجسم إطلاقاً: بلا سجل — الكتابة للذاكرة تكفي، والسجل يُحرَّر لمتغير حارق
-         تُكلف إقامته في الذاكرة أغلى بكثير (عالم بقراءة+كتابة ≈ 8 عمليات ذاكرة كل تكرار) */
+      int idx = c->spoff + d + k, f = -1;
+
+
       int reads = 0;
       for (int q = 0; q < c->n; q++) { if (c->reach[q] && c->ins[q].op == OP_GET_LOCAL && c->ins[q].a == idx) reads++; }
       for (int q = 0; q < nc; q++) if (!cand[q].g && cand[q].idx == idx) { f = q; break; }
@@ -891,7 +891,7 @@ static void jc_promote(JC *c) {
         case OP_NIL: case OP_TRUE: case OP_FALSE: case OP_GET_UPV: ty[d] = 0; break;
         case OP_GET_LOCAL: {
           int k = jc_find_pv(c, 0, in->a); ty[d] = k >= 0 && c->pv[k].ok;
-          if (in->pf && k < 0 && in->a >= c->spoff) { int p = in->a - c->spoff; if (p >= 0 && p < d) ty[d] = ty[p]; } /* وسيط مُدرج يرث نوع موقعه */
+          if (in->pf && k < 0 && in->a >= c->spoff) { int p = in->a - c->spoff; if (p >= 0 && p < d) ty[d] = ty[p]; }
           break;
         }
         case OP_GET_GLOBAL: {
@@ -913,11 +913,11 @@ static void jc_promote(JC *c) {
         case OP_NEG: case OP_GET_PROP: ty[d - 1] = 1; break;
         case OP_NOT: ty[d - 1] = 0; break;
         case OP_GET_INDEX: ty[d - 2] = 0; break;
-        case OP_CALL: ty[d - 1 - in->a] = 0; break; /* نتيجة استدعاء بنوع مجهول — لا ترقية عليها */
+        case OP_CALL: ty[d - 1 - in->a] = 0; break;
         case OP_SET_INDEX: ty[d - 3] = ty[d - 1]; break;
         case OP_FOREACH: for (int k = 0; k < in->b; k++) ty[d + k] = 0; break;
-        case OP_RFOR: for (int k = 0; k < in->c; k++) ty[d + k] = 1; break; /* قيم المدى أرقام دائماً */
-        case OP_JMOVE: { /* انهيار مُدرج: نوع الوجهة = نوع القمة، وما فوقها يموت */
+        case OP_RFOR: for (int k = 0; k < in->c; k++) ty[d + k] = 1; break;
+        case OP_JMOVE: {
           int dst = d - 1 - in->a;
           if (dst >= 0) { ty[dst] = ty[d - 1]; for (int q = dst + 1; q < d; q++) ty[q] = 0; }
           break;
@@ -953,8 +953,8 @@ static void jc_gen_body(JC *c) {
       case OP_CONST: {
         Value v = jc_kc(c, in)[in->a];
         if (IS_NUM(v)) {
-          /* ثابت آلية حلقة داخل المنطقة (عدّاد/عدد/أ): حدّث سجل المتغير المُرقّى أيضاً —
-             RFOR/RFOREP يقرآن السجل لا الذاكرة، وترك السجل قديماً يُبطل تصفير العدّاد كل تكرار خارجي */
+
+
           int pk = jc_find_pv(c, 0, c->spoff + d);
           if (pk >= 0) {
             uint64_t bts; memcpy(&bts, &v.as.n, 8);
@@ -988,7 +988,7 @@ static void jc_gen_body(JC *c) {
       case OP_GET_LOCAL: case OP_GET_GLOBAL: {
         int k = -1;
         if (in->op == OP_GET_LOCAL) k = jc_find_pv(c, 0, in->a);
-        else { /* الترقية لأعالم العوالم فقط — المدمجة لا تُرقّى (ليست أعداداً) */
+        else {
           Str *nm = AS_STR(jc_kc(c, in)[in->a]);
           if (dfind(&c->clo->globals->d, OBJV(nm), nm->hash) >= 0) { int gi = jc_global_index(c, nm); k = jc_find_pv(c, 1, gi); }
         }
@@ -1003,8 +1003,8 @@ static void jc_gen_body(JC *c) {
           if (gi >= 0) {
             gi = jc_global_index(c, nm);
             b = R13; dd = gi * (int)sizeof(Ent) + (int)offsetof(Ent, v);
-            /* فحص هوية لكل موقع إدراج: المستدعى المُدرج يجب أن يظل هو نفسه عند كل تنفيذ —
-               تغيّر العام ⇒ تخفي إلى ip التعليمة نفسها فيعيد المفسّر قراءته بالقيمة الجديدة */
+
+
             for (int z = 0; z < c->ng; z++) if (c->gnames[z] == nm && c->gexp[z]) {
               int dl = jc_deopt(c, i, d);
               jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_OBJ); jc_jcc(c, CC_NE, dl);
@@ -1013,10 +1013,10 @@ static void jc_gen_body(JC *c) {
               break;
             }
           } else {
-            /* عام مدمج (طول، اطبع...): يُقرأ حديثاً من vm.builtins في كل تنفيذ فلا حارس قيمة.
-               حارس الظل: جيل قاموس العوالم لم يتغير منذ الترجمة ⇒ لم يُلحَق أي عام جديد
-               ⇒ الاسم غير مظلَّل؛ أي إلحاق (حتى من استدعاء وسط التنفيذ) يزيد الجيل ⇒
-               تخفي إلى ip التعليمة فيقرأه المفسّر بالمسار الطبيعي (ظلّ أو مدمج). */
+
+
+
+
             int bi = dfind(&vm.builtins, OBJV(nm), nm->hash);
             if (bi < 0) { c->failed = 1; c->why = "global"; break; }
             c->nbi++;
@@ -1069,58 +1069,58 @@ static void jc_gen_body(JC *c) {
       case OP_GET_PROP: {
         Value nm = c->fn->ch.consts.v[in->a];
         if (!IS_T(nm, O_STR)) { c->failed = 1; c->why = "prop"; break; }
-        if (AS_STR(nm) != vm.s_len) { /* خاصية عامة: خرائط/كائنات/سلاسل/أصناف عبر مساعد المفسّر */
+        if (AS_STR(nm) != vm.s_len) {
           jc_prop_callout(c, i, d, AS_STR(nm));
           if (c->failed) break;
-          c->sd[d - 1] = sd_mk(SK_MEM); /* النتيجة في ذاكرة d-1 (canon الداخلي وحّد البقية) */
+          c->sd[d - 1] = sd_mk(SK_MEM);
           break;
         }
         int t = jc_alloc_tmp(c, d);
         int lmap = jc_new_label(c), ldone = jc_new_label(c);
-        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد */
-        jc_list_ptr_lab(c, i, d, d - 1, lmap); /* طول قائمة: مسار سريع، وغير القائمة للمساعد */
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv));
+        jc_list_ptr_lab(c, i, d, d - 1, lmap);
         if (c->failed) break;
         jx_cvtsi2sd32_m(x, t, RAX, (int)(offsetof(List, a) + offsetof(VArr, n)));
         c->sd[d - 1] = sd_mk(SK_XMM); c->sd[d - 1].r = (uint8_t)t;
         jc_jmp(c, ldone);
         jc_bind(c, lmap);
-        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
-        jc_prop_callout(c, i, d, AS_STR(nm)); /* طول خريطة/نص/كائن */
+        memcpy(c->sd, sv, sizeof(sv));
+        jc_prop_callout(c, i, d, AS_STR(nm));
         if (c->failed) break;
-        memcpy(c->sd, sv, sizeof(sv)); /* المسار السريع وحده يصل الدمج */
+        memcpy(c->sd, sv, sizeof(sv));
         c->sd[d - 1] = sd_mk(SK_XMM); c->sd[d - 1].r = (uint8_t)t;
         jc_bind(c, ldone);
         break;
       }
       case OP_GET_INDEX: {
-        /* مسار القائمة السريع؛ غير القائمة (خريطة/نص/كائن) عبر مساعد المفسّر بدل التخفي —
-           فحص المفتاح العددي داخل مسار القائمة فقط (مفاتيح الخرائط قد تكون نصوصاً) */
+
+
         int lmap = jc_new_label(c), ldone = jc_new_label(c);
         jc_list_ptr_lab(c, i, d, d - 2, lmap);
         if (c->failed) break;
-        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد */
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv));
         jc_need_num(c, i, d, d - 1);
         jc_list_index(c, i, d, d - 1);
         jc_copyx(c, R12, -1, (d - 2) * 16, RDX, RCX, 0);
         c->sd[d - 2] = sd_mk(SK_MEM);
         jc_jmp(c, ldone);
         jc_bind(c, lmap);
-        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
+        memcpy(c->sd, sv, sizeof(sv));
         jc_index_callout(c, i, d, 0);
         if (c->failed) break;
-        memcpy(c->sd, sv, sizeof(sv)); /* المسار السريع وحده يصل الدمج — حالته هي المعتمدة */
+        memcpy(c->sd, sv, sizeof(sv));
         c->sd[d - 2] = sd_mk(SK_MEM);
         jc_bind(c, ldone);
         break;
       }
       case OP_SET_INDEX: {
-        /* نفس بنية GET_INDEX: قائمة سريعة، وغير القائمة (خريطة/كائن) عبر مساعد المفسّر */
+
         int lmap = jc_new_label(c), ldone = jc_new_label(c);
         jc_list_ptr_lab(c, i, d, d - 3, lmap);
         if (c->failed) break;
-        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv)); /* حالة ما قبل العملية: أساس يشحنه المساعد —
-            تعطيل وضع ما بعد المسار السريع هنا كان جذر الخلل: canon كان يشحن سجل m (var4) في موضع
-            الكائن بدل الكائن نفسه لأن الحالة قد عدّلت قبل حفظها */
+        SD sv[JMAXD + 8]; memcpy(sv, c->sd, sizeof(sv));
+
+
         jc_need_num(c, i, d, d - 2);
         jc_list_index(c, i, d, d - 2);
         SD v = c->sd[d - 1];
@@ -1135,11 +1135,11 @@ static void jc_gen_body(JC *c) {
         c->sd[d - 3] = v;
         jc_jmp(c, ldone);
         jc_bind(c, lmap);
-        memcpy(c->sd, sv, sizeof(sv)); /* canon يقرأ حالة ما قبل العملية لا ما بعد المسار السريع */
+        memcpy(c->sd, sv, sizeof(sv));
         jc_index_callout(c, i, d, 1);
         if (c->failed) break;
         memcpy(c->sd, sv, sizeof(sv));
-        c->sd[d - 3] = v; /* قيمة التعبير بحالة المسار السريع (المساعد كتبها في الذاكرة أيضاً) */
+        c->sd[d - 3] = v;
         jc_bind(c, ldone);
         break;
       }
@@ -1245,32 +1245,32 @@ static void jc_gen_body(JC *c) {
         break;
       }
       case OP_RFOREP: {
-        /* تهيئة حلقة مدى متداخلة داخل المنطقة (كالمفسّر): flag=1: n=ceil(ب−أ) تُكتب في base+1 — flag=0: تنقيح العدد في base */
+
         jc_canon(c, 0, d);
         int base = in->a, flag = in->b;
         int dl = jc_deopt(c, i, d);
-        int ak = jc_find_pv(c, 0, base), wk = jc_find_pv(c, 0, base + 1); /* أ/العدد و ب/العدّاد */
-        /* فحصا الوسم كلاهما كالمفسّر: المُرقّى في سجل pv عددٌ ضمناً — وإلا فحص الوسم في ذاكرة الإطار */
+        int ak = jc_find_pv(c, 0, base), wk = jc_find_pv(c, 0, base + 1);
+
         if (ak < 0) { jx_cmp32_mi(x, RBX, base * 16, V_NUM); jc_jcc(c, CC_NE, dl); }
         if (wk < 0) { jx_cmp32_mi(x, RBX, (base + 1) * 16, V_NUM); jc_jcc(c, CC_NE, dl); }
-        int t = 3, z = 4; /* بعد التمهيد كل المؤقتات حرّة — نمط RFOR نفسه (XMM3/XMM4) */
+        int t = 3, z = 4;
         if (ak >= 0) jx_movaps(x, t, c->pv[ak].reg);
         else jx_movsd_rm(x, t, RBX, base * 16 + 8);
-        if (flag) { /* n = ceil(ب − أ) */
+        if (flag) {
           if (wk >= 0) jx_movaps(x, z, c->pv[wk].reg);
           else jx_movsd_rm(x, z, RBX, (base + 1) * 16 + 8);
           jx_subsd(x, z, t);
-          jx_roundsd(x, z, z, 0x0A); /* تقريب للسقف */
-        } else jx_movaps(x, z, t); /* n = العدد نفسه */
-        jx_xorpd(x, t, t); /* 0.0 */
+          jx_roundsd(x, z, z, 0x0A);
+        } else jx_movaps(x, z, t);
+        jx_xorpd(x, t, t);
         jx_ucomisd(x, z, t);
         int ok = jc_new_label(c);
-        jc_jcc(c, CC_A, ok); /* n > 0 ترتيبياً: أبقِه — inf يبقى حلقة لا نهائية كالمفسّر */
-        jx_movaps(x, z, t);  /* NaN والسالب والصفر → 0 */
+        jc_jcc(c, CC_A, ok);
+        jx_movaps(x, z, t);
         jc_bind(c, ok);
         int dst = flag ? base + 1 : base, dk = jc_find_pv(c, 0, dst);
-        { /* السلوت يوافق عمقاً في المكدس (القيم دُفعت داخل المنطقة): حدّث الحالة الرمزية وإلا
-             أعاد canon في RFOR التالية كتابة القيمة القديمة فوق العدد المحسوب */
+        {
+
           int dd2 = dst - c->spoff;
           if (dd2 >= 0 && dd2 < d) {
             if (dk >= 0) { c->sd[dd2] = sd_mk(SK_VAR); c->sd[dd2].r = (uint8_t)c->pv[dk].reg; c->sd[dd2].var = dk; }
@@ -1278,37 +1278,37 @@ static void jc_gen_body(JC *c) {
             c->sd[dd2].n = 1;
           }
         }
-        if (dk >= 0) jx_movaps(x, c->pv[dk].reg, z); /* العدد في سجل المتغير المُرقّى */
-        else jx_movsd_mr(x, RBX, dst * 16 + 8, z);   /* الوسم V_NUM ثابت قبل وبعد — بلا كتابة وسم */
+        if (dk >= 0) jx_movaps(x, c->pv[dk].reg, z);
+        else jx_movsd_mr(x, RBX, dst * 16 + 8, z);
         break;
       }
       case OP_RFOR: {
-        /* حلقة المدى المتخصصة: عدّاد من 0 حتى العدد، القيمة = أ + العدّاد — عند الترقية كل شيء في سجلات pv بلا ذاكرة لكل تكرار */
+
         jc_canon(c, 0, d);
         int base = in->a, flag = in->b, nvr = in->c;
-        int coff = flag ? 40 : 24, loff = flag ? 24 : 8; /* بايت: داخل كل سلوت 16 بايت الوسم عند +0 والعدد عند +8 */
-        int ck = jc_find_pv(c, 0, flag ? base + 2 : base + 1); /* العدّاد */
-        int lk = jc_find_pv(c, 0, flag ? base + 1 : base + 0); /* العدد */
-        int ak = flag ? jc_find_pv(c, 0, base) : -1;           /* أ */
+        int coff = flag ? 40 : 24, loff = flag ? 24 : 8;
+        int ck = jc_find_pv(c, 0, flag ? base + 2 : base + 1);
+        int lk = jc_find_pv(c, 0, flag ? base + 1 : base + 0);
+        int ak = flag ? jc_find_pv(c, 0, base) : -1;
         int ex = jc_jump_label(c, in, d, 0);
-        int cold; /* السجل الحامل للعدّاد القديم */
+        int cold;
         if (ck >= 0) {
           cold = c->pv[ck].reg;
           if (lk >= 0) jx_ucomisd(x, cold, c->pv[lk].reg);
           else jx_rm(x, 0x66, 0, 0x0F2E, cold, RBX, -1, 0, base * 16 + loff);
         } else {
-          jx_movsd_rm(x, 3, RBX, base * 16 + coff); cold = 3; /* XMM3 = العدّاد */
+          jx_movsd_rm(x, 3, RBX, base * 16 + coff); cold = 3;
           if (lk >= 0) jx_ucomisd(x, 3, c->pv[lk].reg);
           else jx_rm(x, 0x66, 0, 0x0F2E, 3, RBX, -1, 0, base * 16 + loff);
         }
-        jc_jcc(c, CC_AE, ex); /* انتهى → خروج (NaN مستحيل: RFOREP يصفّر العدد) */
-        int vx = cold;        /* القيمة = العدّاد القديم (flag=0) */
-        if (flag) {           /* القيمة = أ + العدّاد القديم → XMM4 */
+        jc_jcc(c, CC_AE, ex);
+        int vx = cold;
+        if (flag) {
           if (ak >= 0) jx_movaps(x, 4, c->pv[ak].reg);
           else jx_movsd_rm(x, 4, RBX, base * 16 + 8);
           jx_addsd(x, 4, cold); vx = 4;
         }
-        /* كتابة الوجهات: nv=2 → ي=الفهرس (العدّاد القديم) ثم ت=القيمة؛ nv=1 → ي=القيمة */
+
         for (int k = 0; k < nvr; k++) {
           int src = (nvr == 2 && k == 0) ? cold : vx;
           int dk = jc_find_pv(c, 0, c->spoff + d + k);
@@ -1320,13 +1320,13 @@ static void jc_gen_body(JC *c) {
             c->sd[d + k] = sd_mk(SK_MEM);
           }
         }
-        /* زيادة العدّاد: في سجله عند الترقية وإلا في الذاكرة (عبر مجمع الثوابت) */
+
         if (ck >= 0) jc_rip(c, 0xF2, 0x0F58, c->pv[ck].reg, jc_pool(c, 0x3FF0000000000000ull));
         else { jc_rip(c, 0xF2, 0x0F58, 3, jc_pool(c, 0x3FF0000000000000ull)); jx_movsd_mr(x, RBX, base * 16 + coff, 3); }
         break;
       }
       case OP_JMOVE: {
-        /* انهيار إطار مُدرج: انسخ قيمة القمة (d-1) إلى العمق d-1-k — نقل رمزي بصفر تعليمات متى أمكن */
+
         int k = in->a, src = d - 1, dst = d - 1 - k;
         SD s = c->sd[src];
         switch (s.k) {
@@ -1334,28 +1334,28 @@ static void jc_gen_body(JC *c) {
           case SK_HOME:
             if (!(s.hb == R12 && s.hd == dst * 16)) jc_copy16(c, R12, dst * 16, s.hb, s.hd);
             c->sd[dst] = sd_mk(SK_MEM); c->sd[dst].n = s.n; break;
-          default: /* SK_MEM */
+          default:
             if (src != dst) jc_copy16(c, R12, dst * 16, R12, src * 16);
             c->sd[dst] = sd_mk(SK_MEM); c->sd[dst].n = s.n; break;
         }
         break;
       }
       case OP_CALL: {
-        /* call-out: استدعاء غير قابل للإدراج يُنفَّذ عبر مساعد C ثم تكمل المنطقة.
-           المستدعى عند d-1-argc والوسائط حتى d-1؛ النتيجة تعود حتمياً في ذاكرة d-1-argc. */
+
+
         int argc = in->a;
         if (d - 1 - argc < 0) { c->failed = 1; c->why = "call"; break; }
-        jc_canon(c, 0, d); /* كل ما تحت القمة إلى الذاكرة: المستدعى والوسائط يُقرأون من المكدس الحقيقي */
-        jc_flush_vars(c);  /* قيم السجلات إلى بيوتها قبل الـ GC والاستدعاء */
+        jc_canon(c, 0, d);
+        jc_flush_vars(c);
         const uint8_t *cip = in->ip, *rip = in->ip + in->len; int cdep = d - argc;
-        if (in->rd >= 0) { /* استدعاء داخل جسم مُدرج: الأسطر والاستئناف عند موقع الاستدعاء الأصلي —
-          المستدعى والوسائط ما زالت في أماكنها (الجسم يعمل فوقها) فيُعاد تنفيذ الاستدعاء الأصلي كاملاً */
+        if (in->rd >= 0) {
+
           cip = rip = c->ins[in->rd].ip; cdep = c->depth[in->rd];
         }
-        int ex2 = jc_exit_label2(c, cip, cdep, 2); /* استثناء: بلا تفريغ */
-        int ex3 = jc_exit_label2(c, rip, cdep, 3); /* تخفي بعد الاستدعاء: المكدس صحيح */
+        int ex2 = jc_exit_label2(c, cip, cdep, 2);
+        int ex3 = jc_exit_label2(c, rip, cdep, 3);
 #if JX_ARM
-        /* SysV ARM64: x0-x3 = (cx, sp, argc, cip) */
+
         jx_mov_rr(x, RAX, R15);
         jx_lea(x, RCX, R12, -1, 0, d * 16);
         jx_mov_ri(x, RDX, (uint64_t)argc);
@@ -1366,7 +1366,7 @@ static void jc_gen_body(JC *c) {
         jx_mov_ri(x, R8, (uint64_t)argc);
         jx_mov_ri(x, R9, (uint64_t)(uintptr_t)cip);
 #else
-        /* SysV x64: RDI, RSI, RDX, RCX (إصلاح خلل كامن: كان يمرر ترتيب ويندوز دائماً) */
+
         jx_mov_rr(x, RDI, R15);
         jx_lea(x, RSI, R12, -1, 0, d * 16);
         jx_mov_ri(x, RDX, (uint64_t)argc);
@@ -1374,19 +1374,19 @@ static void jc_gen_body(JC *c) {
 #endif
         jc_call_helper(c, (void *)jit_h_call);
         jx_cmp32_mi(x, R15, (int)offsetof(JitCtx, code), 0); jc_jcc(c, CC_NE, ex2);
-        if (c->ng > 0 || c->nbi > 0) { /* إعادة اشتقاق R13: القاموس قد نما (فحص الجيل يقرأ من R13) */
+        if (c->ng > 0 || c->nbi > 0) {
           jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
           jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
           jx_mov_rm(x, R13, RSI, (int)offsetof(Dict, e));
         }
-        for (int k = 0; k < c->npv; k++) { /* إعادة تحميل pv مع فحص الوسم: العوالم تتغير والمحليات عبر upvalues */
+        for (int k = 0; k < c->npv; k++) {
           PV *p = &c->pv[k];
-          if (p->noc && !p->g) continue; /* سلوت حلقة داخلية: لا مستدعى يصل إليه */
+          if (p->noc && !p->g) continue;
           int b, dd; jc_pv_home(p, &b, &dd);
           jx_mov32_rm(x, RAX, b, dd); jx_cmp32_ri(x, RAX, V_NUM); jc_jcc(c, CC_NE, ex3);
           jx_movsd_rm(x, p->reg, b, dd + 8);
         }
-        c->sd[d - 1 - argc] = sd_mk(SK_MEM); /* النتيجة في الذاكرة حتمياً */
+        c->sd[d - 1 - argc] = sd_mk(SK_MEM);
         break;
       }
       default: c->failed = 1; c->why = "op"; break;
@@ -1399,38 +1399,38 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   JitRegion *res = NULL;
   c->fn = fn; c->clo = clo; c->slots = slots; c->head = head; c->tail = tail;
   c->spoff = (int)(sp - slots); c->usepromo = 1;
-  c->ggen = (&c->clo->globals->d)->gen; /* جيل العوالم عند الترجمة: أساس حارس ظلّ المدمج */
+  c->ggen = (&c->clo->globals->d)->gen;
   c->x.cap = 1 << 20; c->x.p = malloc(c->x.cap);
   if (!jc_analyze(c)) { if (g_jit_trace) fprintf(stderr, "[jit] تحليل فشل: %s\n", c->why ? c->why : "?"); goto out; }
-  jc_inline(c); /* إدراج أجسام الدوال قبل الترقية والتوليد */
+  jc_inline(c);
   if (c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] إدراج فشل: %s\n", c->why ? c->why : "?"); goto out; }
   c->nlab = c->n;
   for (int i = 0; i < c->n; i++) { c->lpos[i] = -1; c->dl[i] = -1; }
   jc_promote(c);
   XB *x = &c->x;
 #if JX_ARM
-  /* إطار 160 بايت: [0..15] x19,x20 (pre-index) — [16..55] منطقة d3-d7 العابرة —
-     [64..87] x21-x23 — [88..151] d8-d15 الواردة — [152..159] x30 (LR) */
+
+
   jx_stp_pre64(x, 19, 20, 160);
   jx_stp64(x, 21, 22, 31, 64);
   jx_str64_raw(x, 23, 31, 80);
   for (int p = 0; p < 4; p++) jx_stpd(x, 8 + 2 * p, 9 + 2 * p, 31, 88 + 16 * p);
-  jx_str64_raw(x, 30, 31, 152); /* LR: blr المساعدين يسحقها — بلا إنقاذ يعيد ret القفز إلى داخل الكود نفسه (حلقة لانهائية) */
-  jx_mov_rr(x, R15, RAX); /* وسيط JitCtx* الأول يصل في x0 */
+  jx_str64_raw(x, 30, 31, 152);
+  jx_mov_rr(x, R15, RAX);
 #else
   jx_push(x, RBX); jx_push(x, R12); jx_push(x, R13); jx_push(x, R14); jx_push(x, R15);
 #if JX_WIN
-  /* على ويندوز RSI وRDI محفوظتان (callee-saved) يجب إرجاعهما كما استُقبلتا */
+
   jx_push(x, RDI); jx_push(x, RSI);
-#define JX_SAVE_AREA 192 /* 112 لعمليات الحفظ المؤقتة + 80 لقيم XMM6-15 الواردة */
+#define JX_SAVE_AREA 192
 #else
 #define JX_SAVE_AREA 112
 #endif
   jx_sub_rsp(x, JX_SAVE_AREA);
 #if JX_WIN
-  /* حفظ XMM6-15 الواردة من الـ VM (محفوظة على ويندوز) لاستعادتها عند الخروج */
+
   for (int r = 6; r <= 15; r++) jx_movsd_mr(x, RSP, 112 + (r - 6) * 8, r);
-  /* وسيط JitCtx* الأول يصل في RCX على ويندوز (بدل RDI في لينكس) */
+
   jx_mov_rr(x, R15, RCX);
 #else
   jx_mov_rr(x, R15, RDI);
@@ -1444,8 +1444,8 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   if (c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] توليد فشل: %s\n", c->why ? c->why : "?"); goto out; }
   jc_bind(c, lguards);
   {
-    int fail = jc_exit_label2(c, head, 0, 3); /* تخفي بلا تفريغ: سجلات pv غير محملة بعد والاستئناف من رأس المنطقة */
-    if (c->ng > 0 || c->nbi > 0) { /* R13 يلزم أيضاً لمواقع قراءة المدمج (فحص جيل العوالم) */
+    int fail = jc_exit_label2(c, head, 0, 3);
+    if (c->ng > 0 || c->nbi > 0) {
       jx_mov_rm(x, RAX, R14, (int)offsetof(Closure, globals));
       jx_lea(x, RSI, RAX, -1, 0, (int)offsetof(Map, d));
       jx_mov_rm(x, RDI, RSI, (int)offsetof(Dict, e));
@@ -1457,7 +1457,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
           jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)c->gnames[k]);
           jx_cmp_rm(x, RAX, RDI, gi * (int)sizeof(Ent) + (int)offsetof(Ent, k) + 8); jc_jcc(c, CC_NE, fail);
         }
-        /* حراسة قيم المستدعين المُدرجين: وسم V_OBJ ومؤشر الـ Closure المتوقع */
+
         for (int k = 0; k < c->ng; k++) {
           if (!c->gexp[k]) continue;
           int vo = c->ggi[k] * (int)sizeof(Ent) + (int)offsetof(Ent, v);
@@ -1472,7 +1472,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
     for (int k = 0; k < c->npv; k++) { int b, d; jc_pv_home(&c->pv[k], &b, &d); if (c->pv[k].noc && !c->pv[k].g) continue; jx_cmp32_mi(x, b, d, V_NUM); jc_jcc(c, CC_NE, fail); }
     for (int k = 0; k < c->npv; k++) {
       int b, d; jc_pv_home(&c->pv[k], &b, &d);
-      if (c->pv[k].noc && !c->pv[k].g) jx_mov32_mi(x, b, d, V_NUM); /* سلوت مُنشأ داخل المنطقة: وسمه قد يكون قديماً — يُكتب V_NUM مرة واحدة هنا (قبل أي تفريغ) */
+      if (c->pv[k].noc && !c->pv[k].g) jx_mov32_mi(x, b, d, V_NUM);
       jx_movsd_rm(x, c->pv[k].reg, b, d + 8);
     }
   }
@@ -1484,7 +1484,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   }
   for (int k = 0; k < c->nex; k++) {
     JX *e = &c->ex[k]; jc_bind(c, e->lab);
-    if (e->code == 0 || e->code == 1) jc_flush_vars(c); /* code=3: السجلات بائتة جزئياً — التفريغ يفسد البيوت */
+    if (e->code == 0 || e->code == 1) jc_flush_vars(c);
     jx_mov_ri(x, RAX, (uint64_t)(uintptr_t)e->ip); jx_mov_mr(x, R15, (int)offsetof(JitCtx, ip), RAX);
     jx_lea(x, RAX, R12, -1, 0, e->depth * 16); jx_mov_mr(x, R15, (int)offsetof(JitCtx, sp), RAX);
     jx_mov32_mi(x, R15, (int)offsetof(JitCtx, code), (uint32_t)e->code);
@@ -1496,12 +1496,12 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jx_ldp64(x, 21, 22, 31, 64);
   jx_ldr64_raw(x, 23, 31, 80);
   jx_ldp64(x, 19, 20, 31, 0);
-  jx_ldr64_raw(x, 30, 31, 152); /* استعادة LR قبل ret */
+  jx_ldr64_raw(x, 30, 31, 152);
   jx_add_rsp(x, 160);
   jx_ret(x);
 #else
 #if JX_WIN
-  /* استعادة XMM6-15 كما استُقبلت من الـ VM */
+
   for (int r = 6; r <= 15; r++) jx_movsd_rm(x, r, RSP, 112 + (r - 6) * 8);
 #endif
   jx_add_rsp(x, JX_SAVE_AREA);
@@ -1511,7 +1511,7 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   jx_pop(x, R15); jx_pop(x, R14); jx_pop(x, R13); jx_pop(x, R12); jx_pop(x, RBX); jx_ret(x);
 #endif
 #if JX_ARM
-  if (c->x.n & 7) xb_u32(x, 0); /* محاذاة 8 للبركة: LDR literal D يتطلب محاذاة طبيعية */
+  if (c->x.n & 7) xb_u32(x, 0);
 #endif
   for (int k = 0; k < c->npool; k++) { jc_bind(c, c->poollab[k]); xb_u64(x, c->pool[k]); }
   if (c->x.n > c->x.cap || c->failed) { if (g_jit_trace) fprintf(stderr, "[jit] فشل: %s\n", c->why ? c->why : "حجم"); goto out; }
@@ -1519,12 +1519,12 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
   for (int k = 0; k < c->nfix; k++) {
     int tp = c->lpos[c->fix[k].lab];
     if (tp < 0) { if (g_jit_trace) fprintf(stderr, "[jit] تسمية غير مربوطة\n"); goto out; }
-    /* pos-4 = بداية تعليمة الترقيع (b/b.cond/ldr literal)؛ rel بالتعليمات = (tp - ipos)/4 */
+
     int ipos = c->fix[k].pos - 4;
     int32_t rel = tp - ipos;
     uint32_t w; memcpy(&w, c->x.p + ipos, 4);
-    if ((w >> 26) == 5u) w = 0x14000000u | ((uint32_t)(rel / 4) & 0x3FFFFFFu);             /* b: imm26 */
-    else w = (w & ~0x00FFFFE0u) | (((uint32_t)(rel / 4) & 0x7FFFFu) << 5);                 /* b.cond: imm19 مع حفظ cond / ldr literal: حفظ Rt */
+    if ((w >> 26) == 5u) w = 0x14000000u | ((uint32_t)(rel / 4) & 0x3FFFFFFu);
+    else w = (w & ~0x00FFFFE0u) | (((uint32_t)(rel / 4) & 0x7FFFFu) << 5);
     memcpy(c->x.p + ipos, &w, 4);
   }
 #else
@@ -1539,19 +1539,19 @@ static JitRegion *jit_compile(Fun *fn, const uint8_t *head, const uint8_t *tail,
     if (g_jit_bytes + sz > (64u << 20)) goto out;
     int mflags = MAP_PRIVATE | MAP_ANONYMOUS;
 #if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
-    mflags |= MAP_JIT; /* Apple Silicon: تنفيذ من صفحات قابلة للكتابة يتطلب MAP_JIT */
+    mflags |= MAP_JIT;
 #endif
     void *mem = mmap(NULL, sz, PROT_READ | PROT_WRITE, mflags, -1, 0);
     if (mem == MAP_FAILED) goto out;
 #if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
-    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(0); /* فتح الكتابة مؤقتاً */
+    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(0);
 #endif
     memcpy(mem, c->x.p, (size_t)c->x.n);
 #if JX_ARM
-    __builtin___clear_cache((char *)mem, (char *)mem + sz); /* إبطال ذاكرة التعليمات بعد النسخ */
+    __builtin___clear_cache((char *)mem, (char *)mem + sz);
 #endif
 #if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
-    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(1); /* إغلاق الكتابة مجدداً */
+    if (pthread_jit_write_protect_np) pthread_jit_write_protect_np(1);
 #endif
     if (mprotect(mem, sz, PROT_READ | PROT_EXEC) != 0) { munmap(mem, sz); g_jit = 0; goto out; }
     res = calloc(1, sizeof(JitRegion));
@@ -1576,9 +1576,9 @@ static void jit_init(void) {
   g_jit = !(e && e[0] == '0');
   g_jit_trace = getenv("SOLAN_JIT_TRACE") != NULL;
 #if JX_ARM
-  /* AArch64: FP/NEON مضمونة في المستوى الأساسي للمعمارية — لا فحص قدرات.
-     وأمان: إن أُجبر SOLAN_JIT=2 على مضيف غير ARM (فحص ترجمة) فاعقله —
-     تنفيذ بايتات ARM على x86 مستحيل. */
+
+
+
 #if !defined(__aarch64__) && !defined(__arm64__)
   g_jit = 0;
 #endif

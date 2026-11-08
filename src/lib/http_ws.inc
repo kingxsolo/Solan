@@ -152,9 +152,9 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
     tmo_ms[fd] = tmo;
     Buf rq; buf_init(&rq); buf_fmt(&rq, "%s %s HTTP/1.1\r\n", method, u.path);
     if (honly) {
-      /* وضع رؤوس_فقط: لا ترويسات تلقائية إطلاقاً — المحدد يدوياً فقط وبترتيبه.
-         الاستثناء التقني: Host وContent-Length وConnection: close تُضاف فقط إن غابت
-         لأن غيابها يكسر بروتوكول HTTP/1.1 أو قراءة الجسم، لا بصمة الطلب. */
+
+
+
       if (!dict_has_ci(hdrs, "host")) {
         buf_fmt(&rq, "Host: %s", u.host);
         if ((u.tls && u.port != 443) || (!u.tls && u.port != 80)) buf_fmt(&rq, ":%d", u.port);

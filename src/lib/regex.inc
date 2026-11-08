@@ -502,7 +502,7 @@ NAT(n_digits_mode) {
 }
 NAT(f_size) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; if (sstat(AS_STR(a[0])->chars, &st) != 0) { *res = NIL; return true; } *res = NUMV((double)st.st_size); return true; }
 NAT(f_isdir) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; *res = BOOLV(sstat(AS_STR(a[0])->chars, &st) == 0 && S_ISDIR(st.st_mode)); return true; }
-/* تطبيع نصي للمسار إلى مطلق بلا اشتراط وجود الملف (1.2.0) */
+
 #ifndef _WIN32
 static char *abs_lexical(const char *in, char *out, size_t cap) {
   char cwd[PATH_MAX]; if (!getcwd(cwd, sizeof cwd)) return NULL;
@@ -707,7 +707,7 @@ static void init_natives(void) {
   defnat(g, "هل_دالة", n_is_fn, 1, 1); defnat(g, "نسق", n_format, 1, -1); defnat(g, "لون_الكود", n_hl_ansi, 1, 1); defnat(g, "كود_html", n_hl_html, 1, 1); defnat(g, "ارقام_عربية", n_digits_ar, 1, 1); defnat(g, "ارقام_لاتينية", n_digits_en, 1, 1); defnat(g, "ارقام_فارسية", n_digits_fa, 1, 1); defnat(g, "ارقام_الاخراج", n_digits_mode, 1, 1); defnat(g, "كوروتين", co_new, 1, -1); defnat(g, "استأنف", co_resume_n, 1, 2); defnat(g, "منتهي", co_done, 1, 1); defnat(g, "_استأنف", co_step, 1, 3); defnat(g, "_تعداد", n_enum, 1, 1); defnat(g, "لديه", n_has, 2, 2);
   dset(g, KN("النسخة"), mkstr(SOLAN_VERSION, (int)strlen(SOLAN_VERSION)));
 
-  /* دوال رياضية عالمية — موثقة بلا بادئة الوحدة (قرب/ارضي/سقف/بتر...) */
+
   defnat(g, "قرب", m_round, 1, 1); defnat(g, "ارضي", m_floor, 1, 1); defnat(g, "سقف", m_ceil, 1, 1); defnat(g, "بتر", m_trunc, 1, 1);
   defnat(g, "جذر", m_sqrt, 1, 1); defnat(g, "مطلق", m_abs, 1, 1); defnat(g, "قوة", m_pow, 2, 2); defnat(g, "لوغ", m_log, 1, 2);
   defnat(g, "اكبر", m_max, 0, -1); defnat(g, "اصغر", m_min, 0, -1);
@@ -760,7 +760,7 @@ static void init_natives(void) {
   MF(m, "اقرأ_نص", ffi_read_str, 1, 2); MF(m, "اكتب_نص", ffi_write_str, 2, 2);
 #else
   m = mkmod("ffi"); MF(m, "افتح", ffi_na, 0, 1); MF(m, "ربط", ffi_na, 3, 3); MF(m, "ذاكرة", ffi_na, 1, 1); MF(m, "حرر", ffi_na, 1, 1);
-  MF(m, "اقرأ_نص", ffi_na, 1, 2); MF(m, "اكتب_نص", ffi_na, 2, 2);   /* إصلاح 1.2.0: وحدة وهمية برسالة واضحة بدل فشل الاستيراد على 32-بت */
+  MF(m, "اقرأ_نص", ffi_na, 1, 2); MF(m, "اكتب_نص", ffi_na, 2, 2);
 #endif
   m = mkmod("قاعدة"); MF(m, "افتح", db_open, 1, 1); MF(m, "اغلق", db_close, 1, 1); MF(m, "نفذ", db_exec, 2, 3); MF(m, "استعلم", db_query, 2, 3);
   m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1);

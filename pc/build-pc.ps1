@@ -18,8 +18,11 @@ param(
 )
 $ErrorActionPreference = "Continue"   # ملاحظة: أخطاء المترجمات تُكشف عبر $LASTEXITCODE وليس عبر استثناءات PowerShell
 Set-Location (Join-Path $PSScriptRoot "..")
+$rootTools = Join-Path (Split-Path $PSScriptRoot) "tools"
 
 $VER = "1.2.0"
+$fv = ($VER -split '\.')
+while ($fv.Count -lt 4) { $fv += "0" }
 $OUT = "dist"
 New-Item -ItemType Directory -Force -Path $OUT | Out-Null
 
@@ -29,12 +32,12 @@ function Find-Gcc {
   $cands = @()
   if ($Hint) { $cands += $Hint }
   if ($Arch32) {
-    $cands += "C:\Solan-PC\tools\mingw32\bin"
-    $cands += "C:\Solan-PC\tools\winlibs\mingw32\bin"
+    $cands += (Join-Path $rootTools "mingw32\bin")
+    $cands += (Join-Path $rootTools "winlibs\mingw32\bin")
     $cands += "C:\tools\mingw32\bin"
   } else {
-    $cands += "C:\Solan-PC\tools\mingw64\bin"
-    $cands += "C:\Solan-PC\tools\winlibs\mingw64\bin"
+    $cands += (Join-Path $rootTools "mingw64\bin")
+    $cands += (Join-Path $rootTools "winlibs\mingw64\bin")
     $cands += "C:\tools\mingw64\bin"
     $cands += (Join-Path $env:LOCALAPPDATA "Programs\WinLibs\mingw64\bin")
   }
@@ -98,8 +101,8 @@ Set-Content -Path "pc\solan.manifest" -Value $manifest -Encoding UTF8
 
 $rc = @"
 1 VERSIONINFO
-FILEVERSION     1,1,0,0
-PRODUCTVERSION  1,1,0,0
+FILEVERSION     $($fv[0]),$($fv[1]),$($fv[2]),$($fv[3])
+PRODUCTVERSION  $($fv[0]),$($fv[1]),$($fv[2]),$($fv[3])
 FILEOS          0x40004L
 FILETYPE        0x1L
 BEGIN
@@ -188,11 +191,11 @@ if ($Installer) {
   if ($Arch32) { Write-Host "✗ المُثبِّت غير متاح للبناء 32-بت حالياً — الناتج dist\solan32.exe جاهز للنسخ اليدوي" -ForegroundColor Yellow }
   else {
   Write-Host "▸ بناء المُثبِّت (Inno Setup)..." -ForegroundColor Cyan
-  $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   if (-not $iscc) {
     Write-Host "  تثبيت Inno Setup..." 
     winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
-    $iscc = @("$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
   }
   if (-not $iscc) { Write-Host "✗ لم أجد ISCC.exe — ثبّت Inno Setup يدوياً" -ForegroundColor Yellow; exit 1 }
   & $iscc "pc\installer.iss" "/DExeName=$(Join-Path (Get-Location) $exe)"   # مسار مطلق: ISCC يحل النسبي نسبة إلى مجلد .iss

@@ -628,8 +628,8 @@ static int range_loop_expr(int *ra, int *rs, int *raw) {
   consume(T_COMMA, "توقعت '،'"); expression(); int rb = add_local(intern_c("$rb"), true, false);
   if (commas == 2) { consume(T_COMMA, "توقعت '،'"); expression(); }
   consume(T_RP, "توقعت ')'");
-  if (commas == 1 && raw) { *raw = 1; return 3; } /* مسار سريع: أ و ب مربوطتان بـ $ra/$rb على المكدس — بلا خطوة ولا استدعاء */
-  if (commas < 2) emit_const(NUMV(1)); /* الخطوة الافتراضية تُدفع فقط عند غيابها — مع خطوة صريحة تبقى على المكدس لـ $rs */
+  if (commas == 1 && raw) { *raw = 1; return 3; }
+  if (commas < 2) emit_const(NUMV(1));
   *rs = add_local(intern_c("$rs"), true, false);
   named_variable(normstr("_عدد_المدى"), false);
   emit2(OP_GET_LOCAL, (uint8_t)*ra); emit2(OP_GET_LOCAL, (uint8_t)rb); emit2(OP_GET_LOCAL, (uint8_t)*rs); emit2(OP_CALL, 3);
@@ -643,14 +643,14 @@ static void for_stmt(void) {
   int raw = 0, ra, rs; int rk = range_loop_expr(&ra, &rs, &raw); if (!rk) expression();
   int nv = v2 ? 2 : 1;
   if (raw || rk == 1) {
-    /* مسار المدى السريع (OP_RFOR): عدّاد صحيح من 0 حتى العدد، والقيمة = أ + العدّاد — بلا فحوص نوع لكل تكرار */
+
     int base;
     if (raw) {
-      base = ra; /* slots[ra]=أ، slots[ra+1]=ب — RFOREP يستبدل ب بالعدد ceil(ب-أ) */
-      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false); /* slots[ra+2] = العدّاد */
+      base = ra;
+      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false);
     } else {
-      base = add_local(intern_c("$r1"), true, false); /* slots[base] = العدد ن */
-      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false); /* slots[base+1] = العدّاد */
+      base = add_local(intern_c("$r1"), true, false);
+      emit_const(NUMV(0)); add_local(intern_c("$r0"), true, false);
     }
     emit(OP_RFOREP); emit((uint8_t)base); emit((uint8_t)(raw ? 1 : 0)); emit((uint8_t)nv);
     Loop lp; int start = chunk()->n; loop_begin(&lp, start);
