@@ -75,7 +75,7 @@ static int run(int base) {
     int ci = READ16(); Str *name = AS_STR(kst[ci]); Dict *d = &frame->clo->globals->d; int *gp = &gcp[ci]; int gi = *gp;
     if (gi < d->n && d->e[gi].k.t == V_OBJ && d->e[gi].k.as.o == (Obj *)name) { d->e[gi].v = PK(0); NEXT(); }
     int x = dfind(d, OBJV(name), name->hash);
-    if (x < 0) { char sg[300]; suggest(sg, sizeof sg, name, &frame->clo->globals->d, &vm.builtins, NULL); RT("المتغير '%s' غير معرّف (استخدم 'خل' لتعريفه)%s", name->chars, sg); }
+    if (x < 0) { char sg[300]; suggest(sg, sizeof sg, name, &frame->clo->globals->d, &vm.builtins, NULL); RT("المتغير '%s' غير معرّف (استخدم 'خل' أو 'عام' لتعريفه)%s", name->chars, sg); }
     *gp = x; d->e[x].v = PK(0); NEXT();
   }
   CASE(OP_GET_UPV) PUSHL(*frame->clo->upv[READ8()]->loc); NEXT();
@@ -88,6 +88,18 @@ static int run(int base) {
       if (gi < d->n && d->e[gi].k.t == V_OBJ && d->e[gi].k.as.o == (Obj *)name) { sp[-1] = d->e[gi].v; NEXT(); }
       int x = dfind(d, OBJV(name), name->hash);
       if (x >= 0) { *gp = x; sp[-1] = d->e[x].v; NEXT(); }
+    }
+    SAVE(); SYNC(); if (get_prop(r, name, &out)) goto throw_exc;
+    sp[-1] = out; NEXT();
+  }
+  CASE(OP_GET_PROP_Q) {
+    int ci = READ16(); Str *name = AS_STR(kst[ci]); Value out, r = PK(0);
+    if (IS_T(r, O_MAP)) {
+      Map *m = AS_MAP(r); int x = map_find_name(&m->d, name);
+      if (x >= 0) { sp[-1] = m->d.e[x].v; NEXT(); }
+      if (name == vm.s_len) { sp[-1] = NUMV(m->d.live); NEXT(); }
+      if (m->module) { SAVE(); SYNC(); if (get_prop(r, name, &out)) goto throw_exc; sp[-1] = out; NEXT(); }
+      sp[-1] = NIL; NEXT();
     }
     SAVE(); SYNC(); if (get_prop(r, name, &out)) goto throw_exc;
     sp[-1] = out; NEXT();

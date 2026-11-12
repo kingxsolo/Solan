@@ -366,7 +366,14 @@ static void binary(bool ca) {
     case T_SHL: emit(OP_SHL); break; case T_SHR: emit(OP_SHR); break; default: break;
   }
 }
-static void qdot(bool ca) { (void)ca; int j = emit_jump(OP_JNIL); dot(false); patch_jump(j); }
+static void qdot(bool ca) {
+  (void)ca; int j = emit_jump(OP_JNIL);
+  if (P.cur.s == NULL) cerror_at(&P.cur, "توقعت اسم خاصية بعد '؟.'");
+  advance(); Str *name = P.prev.s; int k = make_const(OBJV(name));
+  if (check(T_LP) && !P.cur.nl) { advance(); bool sp; uint8_t n = arglist(&sp); if (sp) { emit(OP_INVOKEV); emit16(k); } else { emit(OP_INVOKE); emit16(k); emit(n); } }
+  else { emit(OP_GET_PROP_Q); emit16(k); }
+  patch_jump(j);
+}
 static void and_(bool ca) { (void)ca; int j = emit_jump(OP_JIF); emit(OP_POP); parse_prec(PREC_AND + 1); patch_jump(j); }
 static void or_(bool ca) { (void)ca; int j = emit_jump(OP_JIT); emit(OP_POP); parse_prec(PREC_OR + 1); patch_jump(j); }
 static void coalesce(bool ca) { (void)ca; int j = emit_jump(OP_JNN); emit(OP_POP); parse_prec(PREC_COALESCE + 1); patch_jump(j); }
@@ -517,6 +524,19 @@ static void var_decl(bool isconst) {
       else if (P.ngt < 256) { P.gtn[P.ngt] = nm; P.gtm[P.ngt] = tm; P.gti[P.ngt++] = ti; }
     }
     define_var(g);
+  } while (match(T_COMMA));
+  match(T_SEMI);
+}
+static void global_decl(void) {
+  do {
+    soft_ident(); if (P.cur.t != T_IDENT) cerror_at(&P.cur, "توقعت اسم متغير بعد 'عام'");
+    advance(); Str *nm = P.prev.s;
+    uint16_t tm = 0; List *ti = NULL; char cx[200]; ctx_tok(cx, sizeof cx, "المتغير", &P.prev);
+    if (match(T_COLON)) parse_type(&tm, &ti, cx);
+    if (match(T_EQ)) { expression(); if (tm) emit_check(tm, ti, cx); } else emit(OP_NIL);
+    if (tm && P.ngt < 256) { P.gtn[P.ngt] = nm; P.gtm[P.ngt] = tm; P.gti[P.ngt++] = ti; }
+    if (is_gconst(nm)) CERR("لا يمكن تغيير قيمة ثابت");
+    emit(OP_DEF_GLOBAL); emit16(make_const(OBJV(nm)));
   } while (match(T_COMMA));
   match(T_SEMI);
 }
@@ -872,6 +892,7 @@ static void declaration_impl(void) {
   }
   else if (match(T_LET)) var_decl(false);
   else if (match(T_CONST)) var_decl(true);
+  else if (match(T_GLOBAL)) global_decl();
   else statement();
 }
 

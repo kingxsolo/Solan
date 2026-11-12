@@ -8,7 +8,6 @@ usage() {
 
   --prefix DIR     مكان التثبيت (الافتراضي /usr/local أو ~/.local عند الحاجة)
   --no-deps        لا يحاول تثبيت المترجم تلقائيًا
-  --no-sqlite      عطّل SQLite المضمّن إن كانت ملفاته موجودة
   --build-only     ابنِ ./solan فقط بلا تثبيت
   --uninstall      احذف solan من مكان التثبيت
   --target NAME    فرض المنصة: linux | macos | bsd | windows | android
@@ -18,13 +17,12 @@ usage() {
 USAGE_END
 }
 
-PREFIX_ARG=""; DEPS=1; SQLITE=1; DRY=0; BUILD_ONLY=0; UNINSTALL=0; TARGET_ARG=""
+PREFIX_ARG=""; DEPS=1; DRY=0; BUILD_ONLY=0; UNINSTALL=0; TARGET_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) [ $# -ge 2 ] || { echo "الخيار --prefix يحتاج قيمة"; exit 2; }; PREFIX_ARG="$2"; shift 2 ;;
     --target) [ $# -ge 2 ] || { echo "الخيار --target يحتاج قيمة"; exit 2; }; TARGET_ARG="$2"; shift 2 ;;
     --no-deps) DEPS=0; shift ;;
-    --no-sqlite) SQLITE=0; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -190,18 +188,10 @@ case "$KIND" in
 esac
 BUILD_CFLAGS="-O2 -Wno-format-truncation ${CPPFLAGS:-} ${CFLAGS:-}"
 
-EMBED_DEF=""; EMBED_OBJ=""
-if [ "$SQLITE" = 1 ] && [ -f third_party/sqlite/sqlite3.c ]; then
-  mkdir -p third_party/sqlite
-  echo "SQLite: مضمَّن في الملف التنفيذي"
-  run $CC -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION ${CPPFLAGS:-} ${CFLAGS:-} -c -o third_party/sqlite/sqlite3.o third_party/sqlite/sqlite3.c
-  EMBED_DEF="-DSOLAN_SQLITE_EMBED"; EMBED_OBJ="third_party/sqlite/sqlite3.o"
-else
-  echo "SQLite: اختياري؛ سيُحمّل من مكتبة النظام وقت التشغيل عند توفرها."
-fi
+echo "SQLite: اختياري؛ تُحمّل من مكتبة النظام وقت التشغيل عند توفرها."
 
 run rm -f "$EXE"
-run $CC $BUILD_CFLAGS $EMBED_DEF -o "$EXE" solan.c $EMBED_OBJ $LINK_EXPORT ${LDFLAGS:-} $LINK_LIBS
+run $CC $BUILD_CFLAGS -o "$EXE" solan.c $LINK_EXPORT ${LDFLAGS:-} $LINK_LIBS
 [ "$DRY" = 1 ] || [ -f "$EXE" ] || { echo "فشل البناء: $EXE غير موجود"; exit 1; }
 
 if [ "$BUILD_ONLY" = 1 ]; then

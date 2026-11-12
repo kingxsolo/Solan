@@ -76,7 +76,9 @@ static bool b64_dec(const char *s, int n, Buf *o) {
 }
 static Value hex_or_raw(const uint8_t *d, int n, bool raw) {
   if (raw) return mkstr((const char *)d, n);
-  char *h = xalloc(n * 2 + 1); for (int i = 0; i < n; i++) sprintf(h + 2 * i, "%02x", d[i]);
+  static const char HEXC[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
+  char *h = xalloc(n * 2 + 1);
+  for (int i = 0; i < n; i++) { h[2 * i] = HEXC[d[i] >> 4]; h[2 * i + 1] = HEXC[d[i] & 15]; }
   Value v = mkstr(h, n * 2); free(h); return v;
 }
 NAT(c_sha1) { STRA(0); uint8_t o[20]; sha1_raw((const uint8_t *)AS_STR(a[0])->chars, AS_STR(a[0])->len, o); *res = hex_or_raw(o, 20, argc > 1 && !falsey(a[1])); return true; }

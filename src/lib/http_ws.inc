@@ -135,7 +135,6 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
   char method[16]; snprintf(method, sizeof method, "%s", method0); char url[4096]; snprintf(url, sizeof url, "%s", url0); Str *body = body0;
   for (int hop = 0;; hop++) {
     Url u; if (!parse_url(url, &u) || (strcmp(u.scheme, "http") && strcmp(u.scheme, "https"))) { rt_error("رابط غير صالح: %s", url); return 1; }
-    if (u.tls && !tls_load()) return 2;
     char err[300]; int fd;
     if (proxy && *proxy) {
       if (!host_allowed(u.host)) { rt_error("الصلاحية غير ممنوحة: شبكة (المضيف %s)", u.host); return 1; }

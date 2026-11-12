@@ -722,6 +722,7 @@ static void init_natives(void) {
   m = mkmod("ضخم");
   MF(m, "جمع", bg_add, 2, 2); MF(m, "طرح", bg_sub, 2, 2); MF(m, "ضرب", bg_mul, 2, 2); MF(m, "قسمة", bg_div_, 2, 2); MF(m, "باقي", bg_mod_, 2, 2);
   MF(m, "قوة", bg_pow, 2, 2); MF(m, "قارن", bg_cmp, 2, 2); MF(m, "مضروب", bg_fact, 1, 1); MF(m, "رقم", bg_num, 1, 1);
+  MF(m, "قوة_مود", bg_powmod, 3, 3); MF(m, "من_هكس", bg_from_hex, 1, 1); MF(m, "إلى_هكس", bg_to_hex, 1, 2); MF(m, "من_بايتات", bg_from_bytes, 1, 1); MF(m, "إلى_بايتات", bg_to_bytes, 1, 2);
   m = mkmod("عشوائي");
   MF(m, "رقم", r_num, 0, 0); MF(m, "صحيح", r_int, 2, 2); MF(m, "اختر", r_pick, 1, 1); MF(m, "اخلط", r_shuffle, 1, 1); MF(m, "بذرة", r_seed, 1, 1);
   rng_state ^= (uint64_t)(now_sec() * 1e6) * 2654435761ULL; if (!rng_state) rng_state = 1;
@@ -751,6 +752,20 @@ static void init_natives(void) {
   MF(m, "sha1", c_sha1, 1, 2); MF(m, "sha256", c_sha256, 1, 2); MF(m, "hmac_sha256", c_hmac, 2, 3); MF(m, "hmac_sha1", c_hmac_sha1, 2, 3); MF(m, "base64", c_b64, 1, 1);
   MF(m, "base64_قياسي", c_b64, 1, 1); MF(m, "base64_رابط", c_b64url, 1, 1); MF(m, "فك_base64", c_unb64, 1, 1); MF(m, "hex", c_hex, 1, 1); MF(m, "فك_hex", c_unhex, 1, 1); MF(m, "عشوائي_بايتات", c_rand, 1, 1);
   MF(m, "sha512", c_sha512, 1, 2);
+  MF(m, "hmac_sha512", c_hmac_sha512, 2, 3);
+  MF(m, "hkdf_sha256", c_hkdf_sha256, 4, 4);
+  MF(m, "hkdf_sha512", c_hkdf_sha512, 4, 4);
+  MF(m, "aes256_gcm", c_aes256_gcm, 3, 4);
+  MF(m, "aes256_gcm_فك", c_aes256_gcm_dec, 4, 5);
+  MF(m, "aes128_gcm", c_aes128_gcm, 3, 4);
+  MF(m, "aes128_gcm_فك", c_aes128_gcm_dec, 4, 5);
+  MF(m, "aes256_cbc", c_aes256_cbc, 3, 4);
+  MF(m, "aes256_cbc_فك", c_aes256_cbc_dec, 3, 4);
+  MF(m, "aes128_cbc", c_aes128_cbc, 3, 4);
+  MF(m, "aes128_cbc_فك", c_aes128_cbc_dec, 3, 4);
+  MF(m, "chacha20", c_chacha20, 3, 4);
+  MF(m, "chacha20_poly1305", c_chacha_aead, 3, 4);
+  MF(m, "chacha20_poly1305_فك", c_chacha_aead_dec, 4, 5);
   MF(m, "x25519_سر", c_x25519_sec, 0, 1); MF(m, "x25519_عام", c_x25519_pub, 1, 1); MF(m, "x25519_مشترك", c_x25519_shared, 2, 2);
   MF(m, "ed25519_سر", c_ed25519_sec, 0, 1); MF(m, "ed25519_عام", c_ed25519_pub, 1, 1); MF(m, "ed25519_وقّع", c_ed25519_sign, 2, 2); MF(m, "ed25519_تحقق", c_ed25519_verify, 3, 3);
   m = mkmod("نمط");
@@ -764,6 +779,7 @@ static void init_natives(void) {
 #endif
   m = mkmod("قاعدة"); MF(m, "افتح", db_open, 1, 1); MF(m, "اغلق", db_close, 1, 1); MF(m, "نفذ", db_exec, 2, 3); MF(m, "استعلم", db_query, 2, 3);
   m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1);
+  m = mkmod("قاعدة_سريعة"); MF(m, "افتح", kv_open, 1, 1); MF(m, "ضع", kv_put, 3, 3); MF(m, "احصل", kv_get, 2, 3); MF(m, "يوجد", kv_has, 2, 2); MF(m, "احذف", kv_del, 2, 2); MF(m, "زد", kv_incr, 2, 3); MF(m, "مفاتيح", kv_keys, 1, 1); MF(m, "عدد", kv_count, 1, 1); MF(m, "احفظ", kv_flush, 1, 1); MF(m, "اضغط", kv_compact_nat, 1, 1); MF(m, "اغلق", kv_close, 1, 1);
   m = mkmod("حلقة"); loop_cbs = new_list(); pin((Obj *)loop_cbs);
   MF(m, "بعد", lp_after, 2, 2); MF(m, "كل", lp_every, 2, 2); MF(m, "الغ", lp_cancel, 1, 1); MF(m, "راقب", lp_watch, 2, 2);
   MF(m, "الغ_مراقبة", lp_unwatch, 1, 1); MF(m, "خطوة", lp_step, 0, 0); MF(m, "شغل", lp_run, 0, 0); MF(m, "اوقف", lp_stop, 0, 0);

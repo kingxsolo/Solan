@@ -124,6 +124,7 @@ static void vm_init(void) {
   init_keywords();
   for (int i = 0; i < M_COUNT; i++) dset(&vm.mid, OBJV(normstr(method_names[i])), NUMV(i));
   init_natives();
+  zip_register();
   for (int i = 0; STDLIB[i].name; i++) dset(&vm.stdlibd, OBJV(normstr(STDLIB[i].name)), NUMV(i));
   load_prelude();
   apply_aliases();

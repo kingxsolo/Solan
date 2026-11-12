@@ -13,6 +13,11 @@ typedef struct {
 } TLSLib;
 static TLSLib tl; static int tls_state = 0; static void *ctx_verify, *ctx_noverify;
 static void *ssl_of[MAXFD]; static int tmo_ms[MAXFD]; static unsigned char fflag[MAXFD]; static Buf rbuf[MAXFD]; static void *srv_ctx[MAXFD];
+static void *t13_of[MAXFD];
+static int t13_read(int fd, char *buf, size_t n);
+static int t13_write(int fd, const char *d, size_t n);
+static int t13_buffered(int fd);
+static void t13_close(int fd);
 
 #if SOLAN_WIN
 #define TLS_HINT "نزّل OpenSSL 3 (مثلًا: winget install ShiningLight.OpenSSL.Light) أو ضع libssl-3-x64.dll بجوار solan.exe"
@@ -80,16 +85,44 @@ static void *get_ctx(bool verify) {
 }
 static void fd_setup(int fd) {
   if (fd < 0 || fd >= MAXFD) return;
-  ssl_of[fd] = NULL; tmo_ms[fd] = -1; fflag[fd] = 0; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0; srv_ctx[fd] = NULL;
+  ssl_of[fd] = NULL; t13_of[fd] = NULL; tmo_ms[fd] = -1; fflag[fd] = 0; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0; srv_ctx[fd] = NULL;
 }
 static void conn_close(int fd) {
   if (fd < 0) return;
-  if (fd < MAXFD && ssl_of[fd]) { tl.SSL_shutdown(ssl_of[fd]); tl.SSL_free(ssl_of[fd]); }
+  if (fd < MAXFD && t13_of[fd]) { t13_close(fd); }
+  else if (fd < MAXFD && ssl_of[fd]) { tl.SSL_shutdown(ssl_of[fd]); tl.SSL_free(ssl_of[fd]); }
   close(fd); fd_setup(fd);
 }
-static bool fd_buffered(int fd) { return rbuf[fd].n > 0 || (ssl_of[fd] && tl.SSL_pending(ssl_of[fd]) > 0); }
+static bool fd_buffered(int fd) { return rbuf[fd].n > 0 || (ssl_of[fd] && tl.SSL_pending(ssl_of[fd]) > 0) || t13_buffered(fd); }
 
+static ssize_t sock_read(int fd, char *buf, size_t n) {
+  int tmo = tmo_ms[fd];
+  if (tmo >= 0) {
+    struct pollfd p = {fd, POLLIN, 0}; int pr;
+    do pr = poll(&p, 1, tmo); while (pr < 0 && errno == EINTR);
+    if (pr == 0) return -2; if (pr < 0) return -1;
+  }
+  if (fflag[fd] & 8) { ssize_t r; do r = read(fd, buf, n); while (r < 0 && errno == EINTR); if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -2; return r; }
+  ssize_t r; do r = recv(fd, buf, n, 0); while (r < 0 && errno == EINTR);
+  if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -2;
+  return r;
+}
+static int sock_write(int fd, const char *d, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    if (fflag[fd] & 8) { ssize_t w = write(fd, d + off, n - off); if (w < 0) { if (errno == EINTR) continue; return -1; } off += w; continue; }
+    ssize_t w = send(fd, d + off, n - off, MSG_NOSIGNAL);
+    if (w < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) { struct pollfd p = {fd, POLLOUT, 0}; poll(&p, 1, 30000); continue; }
+      return -1;
+    }
+    off += w;
+  }
+  return 0;
+}
 static ssize_t conn_read(int fd, char *buf, size_t n) {
+  if (t13_of[fd]) return t13_read(fd, buf, n);
   void *ssl = ssl_of[fd]; int tmo = tmo_ms[fd];
   if (tmo >= 0 && !(ssl && tl.SSL_pending(ssl) > 0)) {
     struct pollfd p = {fd, POLLIN, 0}; int pr; do pr = poll(&p, 1, tmo); while (pr < 0 && errno == EINTR);
@@ -112,24 +145,19 @@ static ssize_t conn_read(int fd, char *buf, size_t n) {
   return r;
 }
 static int conn_write(int fd, const char *d, size_t n) {
-  void *ssl = ssl_of[fd]; size_t off = 0;
-  while (off < n) {
-    if (fflag[fd] & 8) { ssize_t w = write(fd, d + off, n - off); if (w < 0) { if (errno == EINTR) continue; return -1; } off += w; continue; }
-    if (ssl) {
+  if (t13_of[fd]) return t13_write(fd, d, n);
+  void *ssl = ssl_of[fd];
+  if (ssl) {
+    size_t off = 0;
+    while (off < n) {
       int w = tl.SSL_write(ssl, d + off, (int)(n - off > (1 << 20) ? (1 << 20) : n - off)); if (w > 0) { off += w; continue; }
       int e = tl.SSL_get_error(ssl, w);
       if (e == 2 || e == 3) { struct pollfd p = {fd, e == 2 ? POLLIN : POLLOUT, 0}; poll(&p, 1, 30000); continue; }
       return -1;
     }
-    ssize_t w = send(fd, d + off, n - off, MSG_NOSIGNAL);
-    if (w < 0) {
-      if (errno == EINTR) continue;
-      if (errno == EAGAIN || errno == EWOULDBLOCK) { struct pollfd p = {fd, POLLOUT, 0}; poll(&p, 1, 30000); continue; }
-      return -1;
-    }
-    off += w;
+    return 0;
   }
-  return 0;
+  return sock_write(fd, d, n);
 }
 static int rb_fill(int fd) { char tmp[16384]; ssize_t r = conn_read(fd, tmp, sizeof tmp); if (r > 0) buf_add(&rbuf[fd], tmp, (int)r); return (int)r; }
 static void rb_consume(int fd, int n) { Buf *b = &rbuf[fd]; memmove(b->p, b->p + n, b->n - n); b->n -= n; b->p[b->n] = 0; }
@@ -317,8 +345,9 @@ static int alpn_wire(const char *alpn, unsigned char *w, int wn) {
   }
   return n;
 }
+static bool t13_wrap_client(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es);
 static bool tls_wrap_client_ex(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es) {
-  if (!tls_load()) { snprintf(err, es, "التشفير غير متاح: لم أجد libssl — %s", TLS_HINT); return false; }
+  if (!tls_load()) return t13_wrap_client(fd, host, verify, o, err, es);
   void *ctx = NULL; bool own = false;
   if (o && (o->ciphers || o->ciphersuites || o->groups || o->alpn || o->minver || o->maxver)) {
 

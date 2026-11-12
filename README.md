@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-releas
 pkg install -y clang git && git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
 ```
 
-كل الملفات أيضاً في صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest). **SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً.**
+كل الملفات أيضاً في صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest). **قاعدة_سريعة (مخزن مفاتيح-قيم سولاني) مضمّنة في كل الملفات.**
 
 ### ويندوز
 
@@ -159,7 +159,7 @@ git clone https://github.com/kingxsolo/Solan && cd Solan
 sh install.sh
 ```
 
-يكتشف السكربت توزيعتك ومدير حزمها، ويثبّت مترجم C إن نقص، ويبني مع SQLite مضمّنة، ويثبّت في `/usr/local/bin` أو `~/.local/bin`.
+يكتشف السكربت توزيعتك ومدير حزمها، ويثبّت مترجم C إن نقص، ويبني الملف التنفيذي، ويثبّت في `/usr/local/bin` أو `~/.local/bin`.
 
 #### ملاحظات لينكس
 
@@ -218,7 +218,7 @@ sh install.sh
 ```
 
 - يكتشف السكربت بيئة ترمكس تلقائياً ويثبّت في `$PREFIX/bin` (موجود في `PATH` أصلاً).
-- **بلا JIT** — المفسّر كامل الوظائف، وSQLite تُضمَّن إن توفرت ملفاتها.
+- **بلا JIT** — المفسّر كامل الوظائف.
 - لـ `https`: `pkg install openssl`.
 - جرّب: `solan --version` ثم `solan -e 'اطبع("هلا من الأندرويد")'`.
 
@@ -246,7 +246,7 @@ sh install.sh
 | BSD | x86-64 | من المصدر | ✗ | ✓ كامل |
 
 - **نفس الشجرة المصدرية للجميع** — نفس اللغة والمكتبات والبايت-كود؛ الفرق الوحيد سرعة الحلقات (JIT مقابل مفسَّر).
-- SQLite مضمّنة في كل الملفات الجاهزة.
+- قاعدة_سريعة (مخزن مفاتيح-قيم سولاني) مضمّنة في كل الملفات الجاهزة.
 
 ### المتطلبات
 
@@ -263,7 +263,7 @@ git clone https://github.com/kingxsolo/Solan.git solan && cd solan
 sh install.sh
 ```
 
-يكتشف السكربت نظامك ومدير الحزم، ويحاول تثبيت مترجم C الناقص فقط عند الحاجة، ثم يبني الملف التنفيذي ويثبّته في `/usr/local/bin` أو `~/.local/bin`. المكونات الاختيارية لا تُثبّت تلقائيًا، ويُضمَّن SQLite فقط إذا كانت ملفاته موجودة مسبقًا. ثم:
+يكتشف السكربت نظامك ومدير الحزم، ويحاول تثبيت مترجم C الناقص فقط عند الحاجة، ثم يبني الملف التنفيذي ويثبّته في `/usr/local/bin` أو `~/.local/bin`. المكونات الاختيارية لا تُثبّت تلقائيًا. ثم:
 
 ```bash
 solan --version
@@ -282,7 +282,6 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
 |---|---|
 | `--prefix DIR` | مكان التثبيت |
 | `--no-deps` | لا تحاول تثبيت المترجم تلقائيًا |
-| `--no-sqlite` | لا تضمّن SQLite (يُحمَّل من النظام وقت التشغيل) |
 | `--build-only` | ابنِ `./solan` فقط بلا تثبيت |
 | `--uninstall` | احذف `solan` من مكان التثبيت |
 | `--target NAME` | افرض المنصة: `linux` أو `macos` أو `bsd` أو `windows` أو `android` (للبناء عبر منصات مع `CC`) |
@@ -1258,7 +1257,7 @@ solan                      # الوضع التفاعلي (REPL)
 قاعدة.اغلق(ق)
 ```
 
-إن بُني سولان بـ SQLite مضمَّناً فلا يحتاج مكتبة نظام، وإلا يحمّل `libsqlite3` وقت التشغيل (وإن غابت: `SQLite غير متاح في هذا البناء`).
+تُحمَّل `libsqlite3` من مكتبة النظام وقت التشغيل (وإن غابت: `SQLite غير متاح في هذا البناء` — ثبّتها عبر مدير حزم نظامك). المخزن السولاني `قاعدة_سريعة` مضمّن دائماً ويغني عنها في معظم الاستعمالات.
 
 ### ffi (استدعاء مكتبات C)
 
@@ -1558,7 +1557,7 @@ solan                      # الوضع التفاعلي (REPL)
 | `حلل(قائمة, مواصفات)` | يحلل القائمة (عادةً `وسائط`) إلى `{خيارات، موضعية، اخطاء، مجهولة}`. المواصفات قاموس: اسم الخيار ← `{نوع، افتراضي، اختصار}` |
 | `مساعدة(مواصفات, عنوان)` | نص مساعدة منسّق |
 | `حلل_او_اخرج(قائمة, مواصفات, وصف, امر_اسم)` | يحلل ويطبع المساعدة/الأخطاء ويخرج عند الحاجة |
-| `حلل_اوامر(قائمة, اوامر, عام)` · `مساعدة_اوامر(...)` | برامج متعددة الأوامر (مثل `git add`) |
+| `حلل_اوامر(قائمة, اوامر, خيارات)` · `مساعدة_اوامر(...)` | برامج متعددة الأوامر (مثل `git add`) |
 
 ---
 
@@ -2197,7 +2196,7 @@ sh install.sh --build-only      # يبني ./solan بلا تثبيت (انظر �
 يبني السكربت مباشرة بالمترجم ما يعادل:
 
 ```bash
-cc -O2 -Wno-format-truncation -DSOLAN_SQLITE_EMBED -o solan solan.c third_party/sqlite/sqlite3.o -rdynamic -lm -ldl
+cc -O2 -Wno-format-truncation -o solan solan.c -rdynamic -lm -ldl
 ```
 
 أعلام الربط تتغير حسب المنصة (Linux/Android: `-rdynamic -lm -ldl`، macOS: `-Wl,-export_dynamic -lm`، BSD: `-rdynamic -lm`، Windows: `-lm -lws2_32 -lshell32 -ladvapi32`). علم التصدير **لازم**؛ بدونه تفشل الوحدات الأصلية بخطأ `undefined symbol: solan_*`. أعلام الترجمة الاختيارية عبر `CFLAGS`:
@@ -2207,7 +2206,6 @@ cc -O2 -Wno-format-truncation -DSOLAN_SQLITE_EMBED -o solan solan.c third_party/
 | `-DSOLAN_JIT=0` | بلا المجمّع الفوري (الجيت يعمل افتراضياً على x86-64 Linux فقط) |
 | `-DSOLAN_FORK=0` | بلا `fork` |
 | `-DSOLAN_NOPOOL` | بلا مجمّع الكائنات |
-| `-DSOLAN_SQLITE_EMBED` | تضمين SQLite (يضيفه `install.sh` تلقائياً إن وُجد `sqlite3.c`) |
 | `-DSOLAN_LIBRARY` | يبني مكتبة مشتركة بدل ملف تنفيذي (القسم 11.3) |
 
 ### بناء نسخة ويندوز الأصلية
@@ -2219,7 +2217,7 @@ powershell -ExecutionPolicy Bypass -File pc\get-compiler.ps1          # مترج
 powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء 64-بت + تشغيل الاختبارات + إنشاء المُثبِّت
 ```
 
-- ينتج `dist\solan.exe` ملفاً واحداً ثابتاً: `-O3` + LTO، استهداف `x86-64-v2` (SSE4.2 + POPCNT)، SQLite مضمّنة، manifest بعلم `activeCodePage=UTF-8` و`longPathAware`، وأيقونة ومعلومات إصدار.
+- ينتج `dist\solan.exe` ملفاً واحداً ثابتاً: `-O3` + LTO، استهداف `x86-64-v2` (SSE4.2 + POPCNT)، manifest بعلم `activeCodePage=UTF-8` و`longPathAware`، وأيقونة ومعلومات إصدار.
 - يفعّل الـJIT على ويندوز عبر طبقة `VirtualAlloc/VirtualProtect`، ويفعّل كومة الذاكرة منخفضة التجزؤ (LFH) عند الإقلاع.
 - الخيارات: `-Arch32` (بناء 32-بت i686+SSE2 يعمل على ويندوز 32 و64 بت)، `-V3` (استهداف AVX2 للأجهزة الحديثة)، `-NoStrip` (الاحتفاظ بالرموز للتنقيح)، `-GccBin مسار` (مترجم محدد).
 - المُثبِّت `Solan-1.2.0-Setup-x64.exe` يُبنى بـ Inno Setup بواجهة عربية كاملة (`pc\installer.iss` + `pc\ArabicPC.isl`): PATH + ربط ملفات `.سو` + إزالة تثبيت.
@@ -2235,12 +2233,11 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 | `src/vm/` | الآلة الافتراضية وطرق الأنواع (`methods.inc`) والوحدات (`modules.inc`) والمكتبة القياسية المضمَّنة (`stdlib_embed.inc`) |
 | `src/jit/` | المجمّع الفوري: x86-64 (لينكس وويندوز) وARM64 |
 | `src/core/` | الأنواع وجامع المهملات والذاكرة |
-| `src/lib/` | المكتبات الأصلية (ملفات، شبكة، JSON، regex، ضغط، SQLite، TLS، تشفير منحنيات، ffi، حزم، وقت، ضخم) |
+| `src/lib/` | المكتبات الأصلية (ملفات، شبكة، JSON، regex، ضغط، SQLite، قاعدة_سريعة، TLS، تشفير منحنيات، ffi، حزم، وقت، ضخم) |
 | `src/runtime/` | نقطة التشغيل `main.inc` والـREPL وأدوات `fmt` و`lsp` وتهيئة الدوال المدمجة (`init.inc`) |
 | `src/abi/` | واجهة C (`capi.inc`) و`include/solan.h` |
 | `src/platform/` | الفروق بين الأنظمة (POSIX وويندوز: الذاكرة التنفيذية للـJIT، كومة LFH، UTF-8) |
 | `stdlib/` | المكتبات القياسية المكتوبة بسولان |
-| `third_party/sqlite/` | مصدر SQLite للتضمين الاختياري وقت البناء |
 | `pc/` | بناء نسخة ويندوز الأصلية: سكربت البناء `build-pc.ps1` والمترجم المحمول والمُثبِّت وموارده (أيقونة، manifest، ترجمة عربية) |
 | `assets/` | الهوية البصرية: البانر (`solan-banner.jpg`) والشعار الشفاف (`solan-logo.png`) وسكربت `make-icons.ps1` الذي يولّد الأيقونات (شفافة) من البانر |
 | `dist/` | النواتج الجاهزة بعد البناء (الملفات التنفيذية والمُثبِّت) |
@@ -2257,13 +2254,13 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 |---|---|---|
 | اللغة نفسها، VM، الجيت، جامع المهملات | داخل المشروع | لا (libc / libm فقط، ومعها libdl على Linux) |
 | الضغط (gzip/zlib/deflate) وفك ردود HTTP المضغوطة | داخل المشروع (`flate.inc`) | لا |
-| SQLite (مكتبة `قاعدة`) | يُضمَّن من `sqlite3.c` وقت البناء | لا إن ضُمِّن، وإلا يُحمَّل `libsqlite3` من النظام |
+| SQLite (مكتبة `قاعدة`) | يُحمَّل `libsqlite3` من النظام وقت التشغيل (`dlopen`) | نعم عند استعمالها فقط؛ ثبّتها عبر مدير حزم نظامك |
 | JSON، regex، BigInt، HTTP، WebSocket، المؤقتات | داخل المشروع | لا |
 | **TLS** (https وwss وخادم TLS) | يحمّل **OpenSSL** بـ `dlopen` | **نعم**؛ بدونه تعمل الشبكة العادية (http/tcp) فقط |
 | FFI والوحدات الأصلية | `dlopen` بطبيعتها | تعتمد على ما تحمّله أنت |
 
 - **الضغط:** DEFLATE وzlib وgzip كاملة مع التحقق من CRC32 وAdler32 والطول، ودعم gzip متعدد الأعضاء، وسقف 512 ميغابايت للمخرجات ضد قنابل الضغط. حجم المخرجات قريب من zlib المستوى 6. الفك أبطأ من libz المُحسَّنة يدوياً، وكافٍ للاستعمال العادي.
-- **SQLite:** يُبنى بـ `SQLITE_THREADSAFE=0` (سولان أحادي الخيوط) و`SQLITE_OMIT_LOAD_EXTENSION` (لا تحميل ملحقات أصلية من SQL). التضمين يزيد الملف نحو 1 ميغابايت. يُضمَّن SQLite اختياريًا عند وضع `sqlite3.c` في `third_party/sqlite/` قبل البناء، وإلا تُستخدم مكتبة النظام وقت التشغيل.
+- **SQLite:** لا تُضمَّن بعد الآن؛ وحدة `قاعدة` تحمّل `libsqlite3` من النظام وقت التشغيل (`dlopen`) عند توفرها، وتثبيتها اختياري عبر مدير الحزم. المخزن السولاني `قاعدة_سريعة` مضمّن دائماً ويغني عن SQLite في معظم الاستعمالات.
 - **TLS:** يُبحث عن OpenSSL بالترتيب: `SOLAN_LIBSSL` الصريح، ثم مسارات Linux وAlpine وFreeBSD وmacOS. تُطبع تلميحات التثبيت عند الفشل.
 - **التحقق بنفسك:** `solan -e 'اطبع(نظام.منصة())'` يعرض `ضغط_مضمن` و`sqlite_مضمن`، و`ldd ./solan` على Linux يريك المكتبات المربوطة.
 - لن يكون الملف ثابتاً بالكامل (`-static`) ما دمت تريد FFI والوحدات الأصلية وTLS، لأنها تعتمد على `dlopen`.

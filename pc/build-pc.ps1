@@ -137,24 +137,8 @@ $exe = if ($Arch32) { "$OUT\solan32.exe" } elseif ($V3) { "$OUT\solan-v3.exe" } 
 
 Write-Host "▸ تجميع سولان (استهداف $arch، ربط ثابت، LTO)..." -ForegroundColor Cyan
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-# تضمين SQLite إن وُجد الملف المصدر (مثل install.sh)
-$embedDef = ""; $embedObj = @()
-if (Test-Path "third_party\sqlite\sqlite3.c") {
-  $sqlo = if ($Arch32) { "third_party\sqlite\sqlite3_32.o" } else { "third_party\sqlite\sqlite3.o" }
-  Write-Host "  ▸ تضمين SQLite..."
-  if ($Arch32) {
-    # 32-بت: SSE2 لحساب مضاعف أسرع من x87 (Node 32-بت تتطلب SSE2 أيضاً)
-    & gcc -O2 -mfpmath=sse -msse2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -c -o $sqlo "third_party\sqlite\sqlite3.c"
-  } else {
-    & gcc -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -c -o $sqlo "third_party\sqlite\sqlite3.c"
-  }
-  if ($LASTEXITCODE -ne 0) { throw "فشل تجميع SQLite" }
-  $embedDef = "-DSOLAN_SQLITE_EMBED"
-  $embedObj = @($sqlo)
-}
 if ($Arch32) {
-  & gcc solan.c "pc\solan_res.o" @embedObj -o $exe `
-    $embedDef `
+  & gcc solan.c "pc\solan_res.o" -o $exe `
     -O3 -flto=auto -fno-ident -fno-math-errno `
     -mfpmath=sse -msse2 "-march=$march" `
     -ffunction-sections -fdata-sections -fvisibility=hidden `
@@ -163,8 +147,7 @@ if ($Arch32) {
     -D_WIN32_WINNT=0x0A00 `
     -lws2_32 -lshell32 -ladvapi32 -lm
 } else {
-  & gcc solan.c "pc\solan_res.o" @embedObj -o $exe `
-    $embedDef `
+  & gcc solan.c "pc\solan_res.o" -o $exe `
     -O3 -flto=auto -fno-ident -fno-math-errno `
     "-march=$march" -mtune=generic `
     -ffunction-sections -fdata-sections -fvisibility=hidden `

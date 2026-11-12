@@ -59,13 +59,12 @@ jobs:
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
-      - name: بناء (SQLite مضمّنة)
+      - name: بناء
         shell: msys2 {0}
         run: |
           gcc -O2 -Wno-format-truncation \
-              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSOLAN_SQLITE_EMBED -D_WIN32_WINNT=0x0A00 \
-              -o solan.exe solan.c third_party/sqlite/sqlite3.c \
+              -D_WIN32_WINNT=0x0A00 \
+              -o solan.exe solan.c \
               -lws2_32 -lshell32 -ladvapi32 -lm
 
       - name: الاختبارات (22)
@@ -131,12 +130,10 @@ jobs:
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
-      - name: بناء ثابت (SQLite مضمّنة)
+      - name: بناء ثابت
         run: |
           musl-gcc -O2 -Wno-format-truncation -static \
-              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSOLAN_SQLITE_EMBED \
-              -o solan solan.c third_party/sqlite/sqlite3.c -lm
+              -o solan solan.c -lm
 
       - name: الاختبارات (22)
         run: ./solan pc/اختبار_ويندوز.سو
@@ -181,12 +178,10 @@ jobs:
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
-      - name: بناء ثابت لـARM64 (SQLite مضمّنة)
+      - name: بناء ثابت لـARM64
         run: |
           aarch64-linux-gnu-gcc -O2 -Wno-format-truncation -static \
-              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSOLAN_SQLITE_EMBED \
-              -o solan-arm64 solan.c third_party/sqlite/sqlite3.c -lm
+              -o solan-arm64 solan.c -lm
 
       - name: الاختبارات (22) — تنفيذ ARM64 حقيقي عبر QEMU
         run: qemu-aarch64-static ./solan-arm64 pc/اختبار_ويندوز.سو
@@ -306,14 +301,10 @@ jobs:
         run: |
           clang -O2 -Wno-format-truncation \
               -arch x86_64 -mmacosx-version-min=11.0 \
-              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSOLAN_SQLITE_EMBED \
-              -o solan-intel solan.c third_party/sqlite/sqlite3.c -lm
+              -o solan-intel solan.c -lm
           clang -O2 -Wno-format-truncation \
               -arch arm64 -mmacosx-version-min=11.0 \
-              -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSOLAN_SQLITE_EMBED \
-              -o solan-arm64 solan.c third_party/sqlite/sqlite3.c -lm
+              -o solan-arm64 solan.c -lm
           lipo -create solan-intel solan-arm64 -o solan
           file solan
           lipo -info solan
@@ -421,7 +412,7 @@ jobs:
 
           - ويندوز 64-بت ولينكس 64-بت ولينكس ARM64 وماك (Intel وApple Silicon): **JIT مفعّل** (حلقات أسرع بعدة مرات)
           - ويندوز 32-بت: مفسَّر كامل الوظائف
-          - SQLite مضمّنة في كل الملفات — لا شيء يُطلب منك إضافياً
+          - قاعدة_سريعة (مخزن مفاتيح-قيم سولاني) مضمّنة في كل الملفات؛ وحدة قاعدة تحمّل SQLite من النظام وقت التشغيل عند توفرها
           EOF
 
       - name: نشر الإصدار

@@ -6,7 +6,6 @@
 *.so
 *.dll
 *.dylib
-third_party/sqlite/*.o
 
 # Local state and temporary files
 .solan/

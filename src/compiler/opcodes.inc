@@ -14,6 +14,7 @@
   X(OP_GET_UPV) \
   X(OP_SET_UPV) \
   X(OP_GET_PROP) \
+  X(OP_GET_PROP_Q) \
   X(OP_SET_PROP) \
   X(OP_GET_SUPER) \
   X(OP_GET_INDEX) \
@@ -103,7 +104,7 @@ typedef enum {
   T_PLUSEQ, T_MINUSEQ, T_STAREQ, T_SLASHEQ, T_PCTEQ, T_ARROW, T_ELLIPSIS, T_ANDAND, T_OROR,
   T_IDIV, T_IDIVEQ, T_POWEQ, T_BAND, T_BOR, T_BXOR, T_SHL, T_SHR, T_INC, T_DEC, T_QDOT,
   T_IDENT, T_STR, T_NUM,
-  T_LET, T_CONST, T_FUN, T_IF, T_ELSE, T_WHILE, T_FOR, T_IN, T_BREAK, T_CONT, T_RET, T_TRUE, T_FALSE, T_NIL,
+  T_LET, T_CONST, T_GLOBAL, T_FUN, T_IF, T_ELSE, T_WHILE, T_FOR, T_IN, T_BREAK, T_CONT, T_RET, T_TRUE, T_FALSE, T_NIL,
   T_AND, T_OR, T_NOT, T_CLASS, T_THIS, T_SUPER, T_EXTENDS, T_TRY, T_CATCH, T_THROW, T_IMPORT, T_FROM, T_AS,
   T_REPEAT, T_ELIF, T_ASYNC, T_GEN, T_AWAIT, T_YIELD, T_SWITCH, T_FINALLY, T_EOF, T_ERR
 } TT;
@@ -133,6 +134,7 @@ static void init_keywords(void) {
   static const struct { TT t; const char *words; } kws[] = {
     {T_LET, "خل|متغير|ليكن|اجعل|عرف|فليكن"},
     {T_CONST, "ثابت|دائم|قيمة_ثابتة"},
+    {T_GLOBAL, "عام|عمومي|عالمي"},
     {T_FUN, "دالة|دالّة|وظيفة|اجراء|إجراء|وظيفه"},
     {T_IF, "اذا|إذا|لو|في_حال|اذا_كان|إذا_كان|ان_كان|في_حالة"},
     {T_ELSE, "والا|وإلا|والّا|غير_ذلك|خلاف_ذلك|بخلاف_ذلك|سوى_ذلك|و_الا"},
@@ -195,7 +197,7 @@ static int op_operand_len(const Fun *f, const uint8_t *ip) {
     case OP_GET_LOCAL: case OP_SET_LOCAL: case OP_GET_UPV: case OP_SET_UPV: case OP_CALL: case OP_ITERPREP:
     case OP_Q_LP: case OP_Q_LL: case OP_Q_LK_ADD: case OP_Q_LK_SUB: case OP_Q_LK_MUL: case OP_Q_LK_LT: case OP_Q_LK_GT: case OP_Q_LK_LE: case OP_Q_LK_GE:
     case OP_Q_LL_ADD: case OP_Q_LL_SUB: case OP_Q_LL_MUL: case OP_Q_SETPOP: return 1;
-    case OP_CONST: case OP_GET_GLOBAL: case OP_DEF_GLOBAL: case OP_SET_GLOBAL: case OP_GET_PROP: case OP_SET_PROP: case OP_GET_SUPER:
+    case OP_CONST: case OP_GET_GLOBAL: case OP_DEF_GLOBAL: case OP_SET_GLOBAL: case OP_GET_PROP: case OP_GET_PROP_Q: case OP_SET_PROP: case OP_GET_SUPER:
     case OP_JUMP: case OP_JIF: case OP_JIT: case OP_JNN: case OP_LOOP: case OP_CLASS: case OP_METHOD: case OP_LIST: case OP_MAP:
     case OP_TRY: case OP_IMPORT: case OP_STATIC: case OP_LINE: case OP_JNIL: case OP_INVOKEV: return 2;
     case OP_CHECK: return 4;

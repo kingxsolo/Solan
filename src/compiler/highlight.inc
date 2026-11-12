@@ -16,7 +16,7 @@ static int hl_kw_class(TT t) {
   switch (t) {
     case T_IF: case T_ELSE: case T_ELIF: case T_WHILE: case T_FOR: case T_REPEAT: case T_BREAK: case T_CONT: case T_RET: case T_TRY: case T_CATCH:
     case T_FINALLY: case T_THROW: case T_SWITCH: case T_AWAIT: case T_YIELD: return H_CTRL;
-    case T_LET: case T_CONST: case T_FUN: case T_CLASS: case T_EXTENDS: case T_ASYNC: case T_GEN: return H_DECL;
+    case T_LET: case T_CONST: case T_GLOBAL: case T_FUN: case T_CLASS: case T_EXTENDS: case T_ASYNC: case T_GEN: return H_DECL;
     case T_TRUE: case T_FALSE: case T_NIL: return H_LIT;
     case T_THIS: case T_SUPER: return H_SELF;
     case T_AND: case T_OR: case T_NOT: case T_IN: return H_OPW;

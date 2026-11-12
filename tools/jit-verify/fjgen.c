@@ -3,7 +3,7 @@
      - بناء x86 (SOLAN_JIT == 1): ينفّذ كل حالة بـfj_run ويتحقق من النتائج مباشرة
      - بناء ARM (SOLAN_JIT == 2): يُفرّغ بايتات الكود المولَّد وعناوين g_fj_* والمساعدين
        في fjarm.bin + fjarm.lst لتنفيذها على محاكي Unicorn (armfj.py) — لا تنفيذ محلي
-   البناء: gcc fjgen.c sqlite3.o -o fjgen.exe -DSOLAN_SQLITE_EMBED -O2 -lws2_32 -lshell32 -ladvapi32 -lm */
+   البناء: gcc fjgen.c -o fjgen.exe -O2 -lws2_32 -lshell32 -ladvapi32 -lm */
 #include "src/config.inc"
 #include "src/jit/x64.inc"
 #include "src/jit/arm64.inc"

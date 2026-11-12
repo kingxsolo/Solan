@@ -456,3 +456,64 @@ NAT(c_ed25519_verify) {
   *res = BOOLV(ed_verify(pk, (const uint8_t *)m->chars, (size_t)m->len, sig));
   return true;
 }
+static void hmac_sha512(const uint8_t *key, size_t kl, const uint8_t *d, size_t n, uint8_t out[64]) {
+  uint8_t k[128] = {0}, ip[128], op[128];
+  if (kl > 128) sha512_raw(key, kl, k); else memcpy(k, key, kl);
+  for (int i = 0; i < 128; i++) { ip[i] = (uint8_t)(k[i] ^ 0x36); op[i] = (uint8_t)(k[i] ^ 0x5c); }
+  uint8_t *t = (uint8_t *)xalloc(128 + n); memcpy(t, ip, 128); memcpy(t + 128, d, n);
+  uint8_t inner[64]; sha512_raw(t, 128 + n, inner); free(t);
+  uint8_t t2[192]; memcpy(t2, op, 128); memcpy(t2 + 128, inner, 64); sha512_raw(t2, 192, out);
+}
+NAT(c_hmac_sha512) {
+  STRA(0); STRA(1);
+  Str *ks = AS_STR(a[0]), *ms = AS_STR(a[1]);
+  if ((ks->len | ms->len) & 1) FAIL("مدخلات hmac_sha512 يجب أن تكون هكس صالحة (طول زوجي)");
+  int kn = ks->len / 2, mn = ms->len / 2;
+  uint8_t *k = (uint8_t *)xalloc(kn + 1), *m = (uint8_t *)xalloc(mn + 1);
+  bool ok = true;
+  for (int i = 0; i < kn && ok; i++) { int h = hexv(ks->chars[2 * i]), l2 = hexv(ks->chars[2 * i + 1]); if (h < 0 || l2 < 0) ok = false; else k[i] = (uint8_t)(h * 16 + l2); }
+  for (int i = 0; i < mn && ok; i++) { int h = hexv(ms->chars[2 * i]), l2 = hexv(ms->chars[2 * i + 1]); if (h < 0 || l2 < 0) ok = false; else m[i] = (uint8_t)(h * 16 + l2); }
+  if (!ok) { free(k); free(m); FAIL("مدخلات hmac_sha512 ليست هكس صالحة"); }
+  uint8_t o[64];
+  hmac_sha512(k, kn, m, mn, o);
+  free(k); free(m);
+  *res = hex_or_raw(o, 64, argc > 2 && !falsey(a[2]));
+  return true;
+}
+typedef void (*hmac_fn)(const uint8_t *, size_t, const uint8_t *, size_t, uint8_t *);
+static void hkdf_expand(hmac_fn hmac, size_t olen, const uint8_t *prk, size_t prklen, const uint8_t *info, size_t ilen, uint8_t *okm, int l) {
+  uint8_t t[64]; int tlen = 0, done = 0; uint8_t counter = 1;
+  while (done < l) {
+    uint8_t *b = (uint8_t *)xalloc(tlen + ilen + 1);
+    memcpy(b, t, tlen); memcpy(b + tlen, info, ilen); b[tlen + ilen] = counter;
+    hmac(prk, prklen, b, tlen + ilen + 1, t);
+    free(b);
+    int take = (int)olen < l - done ? (int)olen : l - done;
+    memcpy(okm + done, t, take);
+    done += take; tlen = (int)olen; counter++;
+  }
+}
+static bool hkdf_common(Value *a, int argc, Value *res, bool sha512) {
+  STRA(0); STRA(1); STRA(2); NUMA(3);
+  int l = (int)a[3].as.n;
+  int maxl = sha512 ? 16320 : 8160;
+  if (l < 1 || l > maxl) { char m[120]; snprintf(m, sizeof m, "الطول خارج النطاق (1-%d)", maxl); FAIL("%s", m); }
+  Str *is = AS_STR(a[0]), *ss = AS_STR(a[1]), *ifs = AS_STR(a[2]);
+  if ((is->len | ss->len | ifs->len) & 1) FAIL("مدخلات hkdf يجب أن تكون هكس صالحة (طول زوجي)");
+  int in = is->len / 2, sn = ss->len / 2, fn = ifs->len / 2;
+  uint8_t *ikm = (uint8_t *)xalloc(in + 1), *salt = (uint8_t *)xalloc(sn + 1), *info = (uint8_t *)xalloc(fn + 1);
+  bool ok = true;
+  for (int i = 0; i < in && ok; i++) { int h = hexv(is->chars[2 * i]), l2 = hexv(is->chars[2 * i + 1]); if (h < 0 || l2 < 0) ok = false; else ikm[i] = (uint8_t)(h * 16 + l2); }
+  for (int i = 0; i < sn && ok; i++) { int h = hexv(ss->chars[2 * i]), l2 = hexv(ss->chars[2 * i + 1]); if (h < 0 || l2 < 0) ok = false; else salt[i] = (uint8_t)(h * 16 + l2); }
+  for (int i = 0; i < fn && ok; i++) { int h = hexv(ifs->chars[2 * i]), l2 = hexv(ifs->chars[2 * i + 1]); if (h < 0 || l2 < 0) ok = false; else info[i] = (uint8_t)(h * 16 + l2); }
+  if (!ok) { free(ikm); free(salt); free(info); FAIL("مدخلات hkdf ليست هكس صالحة"); }
+  uint8_t prk[64];
+  uint8_t *okm = (uint8_t *)xalloc(l);
+  if (sha512) { hmac_sha512(salt, sn, ikm, in, prk); hkdf_expand(hmac_sha512, 64, prk, 64, info, fn, okm, l); }
+  else { hmac_sha256(salt, sn, ikm, in, prk); hkdf_expand(hmac_sha256, 32, prk, 32, info, fn, okm, l); }
+  *res = hex_or_raw(okm, l, false);
+  free(ikm); free(salt); free(info); free(okm);
+  return true;
+}
+NAT(c_hkdf_sha256) { return hkdf_common(a, argc, res, false); }
+NAT(c_hkdf_sha512) { return hkdf_common(a, argc, res, true); }

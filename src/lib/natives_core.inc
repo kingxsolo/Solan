@@ -17,6 +17,15 @@ NAT(n_write) {
   fflush(stdout); *res = NIL; return true;
 }
 NAT(n_input) {
+  const char *pr = "";
+  if (argc > 0) { Str *s = tostr(a[0]); pr = s->chars; }
+  if (isatty(0) && isatty(1)) {
+    char *line = le_readline(pr);
+    if (!line) { *res = NIL; return true; }
+    *res = mkstr(line, (int)strlen(line));
+    free(line);
+    return true;
+  }
   if (argc > 0) { Str *s = tostr(a[0]); fwrite(s->chars, 1, s->len, stdout); fflush(stdout); }
   char *line = NULL; size_t cap = 0; ssize_t n = getline(&line, &cap, stdin);
   if (n < 0) { free(line); *res = NIL; return true; }

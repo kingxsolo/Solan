@@ -1,18 +1,5 @@
-static char *(*rl_readline_fn)(const char *); static void (*rl_add_history_fn)(const char *); static int rl_state = 0;
 static char *get_line(const char *prompt) {
-  if (!rl_state) {
-
-#if SOLAN_WIN
-    static const char *names[] = {NULL}; void *h = NULL;
-#else
-    static const char *names[] = {"libreadline.so.8", "libreadline.so.7", "libreadline.so.6", "libreadline.so", "libedit.so.3", "libedit.dylib", "libreadline.dylib", NULL}; void *h = NULL;
-#endif
-
-    for (int i = 0; names[i] && !h; i++) h = dlopen(names[i], RTLD_NOW);
-    if (h) { *(void **)&rl_readline_fn = dlsym(h, "readline"); *(void **)&rl_add_history_fn = dlsym(h, "add_history"); }
-    rl_state = (h && rl_readline_fn && isatty(0)) ? 1 : -1;
-  }
-  if (rl_state > 0) { char *l = rl_readline_fn(prompt); if (l && *l && rl_add_history_fn) rl_add_history_fn(l); return l; }
+  if (isatty(0) && isatty(1)) return le_readline(prompt);
   fputs(prompt, stdout); fflush(stdout); char *line = NULL; size_t cap = 0; ssize_t n = getline(&line, &cap, stdin);
   if (n < 0) { free(line); return NULL; } while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0; return line;
 }
@@ -23,6 +10,7 @@ static void repl(void) {
   for (;;) {
     char *line = get_line(acc.n ? "... " : (use_color(1) ? "\x1b[1;38;5;141m>>> \x1b[0m" : ">>> "));
     if (!line) break;
+    if (isatty(0) && isatty(1) && !acc.n && *line && strncmp(line, "خروج", 8) && strncmp(line, "exit", 4)) le_history_add(line);
     buf_add(&acc, line, (int)strlen(line)); buf_addc(&acc, '\n'); free(line);
     if (!balanced(acc.p)) continue;
     char *t = acc.p; while (*t == ' ' || *t == '\n') t++;
