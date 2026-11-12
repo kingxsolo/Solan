@@ -203,5 +203,5 @@ run $INSTALL_SUDO mkdir -p "$PREFIX/bin"
 run $INSTALL_SUDO cp "$EXE" "$PREFIX/bin/$EXE"
 run $INSTALL_SUDO chmod 755 "$PREFIX/bin/$EXE"
 case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) echo "تنبيه: أضف $PREFIX/bin إلى PATH" ;; esac
-if ! have openssl; then echo "تنبيه اختياري: OpenSSL مطلوب فقط لميزات https وwss."; fi
+if ! have openssl; then echo "تنبيه اختياري: HTTPS يعمل بلا OpenSSL عبر عميل TLS خالص مضمّن؛ OpenSSL يضيف wss وجلب_متدفق وخادم TLS."; fi
 echo "تم! جرّب: solan --version"

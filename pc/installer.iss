@@ -1,11 +1,11 @@
-; =====================================================================
+﻿; =====================================================================
 ;  سولان (Solan) — مُثبِّت ويندوز احترافي
 ;  يثبّت solan.exe، يضيفه إلى PATH، ينشئ اختصارات، ويدعم إزالة التثبيت
-;  البناء: ISCC pc\installer.iss "/DExeName=<مسار مطلق>\solan.exe" /DSolanVersion=1.2.0
+;  البناء: ISCC pc\installer.iss "/DExeName=<مسار مطلق>\solan.exe" /DSolanVersion=1.3.1
 ;  (ISCC يحل المسارات النسبية نسبة إلى مجلد ملف .iss — مرّر مساراً مطلقاً للتنفيذي)
 ; =====================================================================
 #ifndef SolanVersion
-#define SolanVersion "1.2.0"
+#define SolanVersion "1.3.1"
 #endif
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"
