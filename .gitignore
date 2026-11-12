@@ -20,8 +20,4 @@
 /dist/
 /release/
 /tools/*
-!/tools/jit-verify/
-pc/solan.res
-pc/solan_res.o
-pc/*.res
 pc/*.o
