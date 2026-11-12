@@ -198,6 +198,20 @@ static bool ec_pt_affine_x(const XECCurve *cv, const XECPt *p, uint8_t *out) {
   return true;
 }
 
+static bool ec_pt_affine_y(const XECCurve *cv, const XECPt *p, uint8_t *out) {
+  if (ec_pt_is_inf(p)) return false;
+  Big zi = big_modpow(&p->z, &cv->pm2, &cv->p);
+  Big zi2 = ec_mulm(&cv->p, &zi, &zi);
+  Big zi3 = ec_mulm(&cv->p, &zi2, &zi);
+  Big y = ec_mulm(&cv->p, &p->y, &zi3);
+  ec_big_to_bytes(&y, out, cv->bytes);
+  free(zi.d);
+  free(zi2.d);
+  free(zi3.d);
+  free(y.d);
+  return true;
+}
+
 static bool ec_on_curve(const XECCurve *cv, const Big *x, const Big *y) {
   Big lhs = ec_mulm(&cv->p, y, y);
   Big x3 = ec_mulm(&cv->p, x, x);
@@ -251,6 +265,32 @@ static bool ecbig_decompress(int id, const uint8_t *pt, int n, uint8_t *out, int
   *outn = full;
   free(x.d); free(x3.d); free(ax.d); free(rhs.d); free(y.d);
   return true;
+}
+
+static int ecbig_ecdh_shared(int id, const uint8_t *peer, int plen, const uint8_t *priv, int privn, uint8_t *out) {
+  XECCurve *cv = ecbig_curve(id);
+  if (!cv || plen != 1 + 2 * cv->bytes || peer[0] != 0x04) return 0;
+  if (privn < 1 || privn > cv->bytes) return 0;
+  Big qx, qy;
+  big_from_bytes((const char *)peer + 1, cv->bytes, &qx);
+  big_from_bytes((const char *)peer + 1 + cv->bytes, cv->bytes, &qy);
+  if (!ec_on_curve(cv, &qx, &qy)) { free(qx.d); free(qy.d); return 0; }
+  XECPt Q;
+  Q.x = qx; Q.y = qy; Q.z = big_new(1);
+  XECPt R;
+  ec_pt_mul(cv, &Q, priv, privn, &R);
+  ec_pt_free(&Q);
+  if (ec_pt_is_inf(&R)) { ec_pt_free(&R); return 0; }
+  uint8_t *xb = (uint8_t *)xalloc((size_t)cv->bytes);
+  if (!ec_pt_affine_x(cv, &R, xb)) { ec_pt_free(&R); free(xb); return 0; }
+  ec_pt_free(&R);
+  int o = 0;
+  while (o < cv->bytes && xb[o] == 0) o++;
+  memcpy(out, xb + o, (size_t)(cv->bytes - o));
+  int rn = cv->bytes - o;
+  free(xb);
+  memset(out + rn, 0, (size_t)(48 - rn));
+  return rn;
 }
 
 static bool ecbig_ecdsa_verify(int id, const uint8_t *q, int qlen, const uint8_t *hash, int hlen, const uint8_t *rb, int rlen, const uint8_t *sb, int slen) {

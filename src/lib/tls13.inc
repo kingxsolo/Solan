@@ -1,4 +1,4 @@
-
+﻿
 #define T13_AES 0x1301
 #define T13_CHACHA 0x1303
 
@@ -15,7 +15,8 @@ typedef struct {
   uint64_t wseq, rseq;
   Buf tr, raw, dec, hsb;
   uint8_t master12[48], crand12[32], srand12[32];
-  int ems12;
+  int ems12, kx12, sigalg12[2], ecdhe_gid, ecdh12_len;
+  uint8_t ecdh12[48], ecdh_pub[65], g_priv[48], ecdh384_pub[97], g384_priv[48];
   int last_alert;
 } T13;
 
@@ -151,7 +152,7 @@ static void t12_prf(uint8_t *out, int olen, const uint8_t *secret, int slen, con
 }
 static void t12_keys(T13 *t, int w) {
   uint8_t km[160];
-  int kl = t->suite == 0x003C ? 16 : 32;
+  int kl = t->suite == 0x003C || t->suite == 0xC027 ? 16 : 32;
   int ml = 32;
   int ivl = 16;
   int need = ml * 2 + kl * 2 + ivl * 2;
@@ -175,7 +176,7 @@ static void t12_keys(T13 *t, int w) {
   (void)cmk; (void)smk;
 }
 static int t12_seal(T13 *t, unsigned char type, const char *d, int n) {
-  int kl = t->suite == 0x003C ? 16 : 32;
+  int kl = t->suite == 0x003C || t->suite == 0xC027 ? 16 : 32;
   while (n > 0) {
     int take = n > 16384 ? 16384 : n;
     uint8_t mac[32];
@@ -403,6 +404,36 @@ static bool t13_is_ip(const char *h) {
   return col == 1 || (dots == 3 && digs > 0);
 }
 static void t12_rot(T13 *t, int write) { t12_keys(t, write); }
+static void t12_ecdh_gen(T13 *t) {
+  xp256_pubkey(t->g_priv, t->ecdh_pub);
+  static const uint8_t g384x[48] = {
+    0xAA, 0x87, 0xCA, 0x22, 0xBE, 0x8B, 0x05, 0x37, 0x8E, 0xB1, 0xC7, 0x1E, 0xF3, 0x20, 0xAD, 0x74,
+    0x6E, 0x1D, 0x3B, 0x62, 0x8B, 0xA7, 0x9B, 0x98, 0x59, 0xF7, 0x41, 0xE0, 0x82, 0x54, 0x2A, 0x38,
+    0x55, 0x02, 0xF2, 0x5D, 0xBF, 0x55, 0x29, 0x6C, 0x3A, 0x54, 0x5E, 0x38, 0x72, 0x76, 0x0A, 0xB7
+  };
+  static const uint8_t g384y[48] = {
+    0x36, 0x17, 0xDE, 0x4A, 0x96, 0x26, 0x2C, 0x6F, 0x5D, 0x9E, 0x98, 0xBF, 0x92, 0x92, 0xDC, 0x29,
+    0xF8, 0xF4, 0x1D, 0xBD, 0x28, 0x9A, 0x14, 0x7C, 0xE9, 0xDA, 0x31, 0x13, 0xB5, 0xF0, 0xB8, 0xC0,
+    0x0A, 0x60, 0xB1, 0xCE, 0x1D, 0x7E, 0x81, 0x9D, 0x7A, 0x43, 0x1D, 0x7C, 0x90, 0xEA, 0x0E, 0x5F
+  };
+  XECCurve *c384 = ecbig_curve(2);
+  if (c384) {
+    Big GX, GY, K;
+    big_from_bytes((const char *)g384x, 48, &GX);
+    big_from_bytes((const char *)g384y, 48, &GY);
+    big_from_bytes((const char *)t->g384_priv, 48, &K);
+    XECPt G;
+    G.x = GX; G.y = GY; G.z = big_new(1);
+    XECPt R;
+    ec_pt_mul(c384, &G, t->g384_priv, 48, &R);
+    ec_pt_free(&G);
+    t->ecdh384_pub[0] = 0x04;
+    if (!ec_pt_affine_x(c384, &R, t->ecdh384_pub + 1)) memset(t->ecdh384_pub, 0, 97);
+    if (!ec_pt_affine_y(c384, &R, t->ecdh384_pub + 49)) memset(t->ecdh384_pub, 0, 97);
+    ec_pt_free(&R);
+    free(K.d);
+  }
+}
 static void t13_rot(T13 *t, int write) {
   uint8_t ns[32];
   t13_elabel(write ? t->c_ap_sec : t->s_ap_sec, "traffic upd", NULL, 0, ns, 32);
@@ -482,9 +513,13 @@ static bool t13_sh_ok(const uint8_t *p, int n, T13 *t, char *err, int es, uint8_
   if (suite != T13_AES && suite != T13_CHACHA) {
     t->is12 = 1;
     t->suite = suite;
-    t->keylen = suite == 0x003C ? 16 : 32;
+    t->keylen = suite == 0x003C || suite == 0xC027 ? 16 : 32;
+    t->kx12 = (suite == 0xC027 || suite == 0xC028) ? 2 : 1;
+    t->ecdhe_gid = -1;
     int p2 = pos + 1, end2 = n;
     t->ems12 = 0;
+    t->sigalg12[0] = -1;
+    t->sigalg12[1] = -1;
     if (p2 + 2 <= end2) {
       int exl2 = (p[p2] << 8) | p[p2 + 1];
       p2 += 2;
@@ -496,6 +531,13 @@ static bool t13_sh_ok(const uint8_t *p, int n, T13 *t, char *err, int es, uint8_
         p2 += 4;
         if (p2 + el2 > eend2) break;
         if (et2 == 23) t->ems12 = 1;
+        else if (et2 == 13 && el2 >= 2) {
+          int na = (p[p2] << 8) | p[p2 + 1];
+          if (na >= 2 && el2 >= 2 + na * 2) {
+            t->sigalg12[0] = (p[p2 + 2] << 8) | p[p2 + 3];
+            t->sigalg12[1] = (p[p2 + 2 + na * 2 - 2] << 8) | p[p2 + 2 + na * 2 - 1];
+          }
+        }
         p2 += el2;
       }
     }
@@ -517,7 +559,7 @@ static bool t13_sh_ok(const uint8_t *p, int n, T13 *t, char *err, int es, uint8_
     pos += 4;
     if (pos + el > end) { snprintf(err, es, "ServerHello مشوه (امتداد)"); return false; }
     if (et == 43 && el == 2 && p[pos] == 3 && p[pos + 1] == 4) sver = 1;
-    if (et == 51 && el >= 4) {
+    else if (et == 51 && el >= 4) {
       grp = (p[pos] << 8) | p[pos + 1];
       klen = (p[pos + 2] << 8) | p[pos + 3];
       if (klen >= 0 && pos + 4 + klen <= pos + el) share = p + pos + 4;
@@ -547,6 +589,8 @@ static bool t12_handshake(T13 *t, const char *host, bool verify, char *err, int 
   int rsa_nn = 0, rsa_en = 0;
   int state = 0;
   uint8_t pm[48];
+  int cke_n = 0;
+  uint8_t *cke_body = NULL;
   Buf tr12;
   buf_init(&tr12);
   buf_add(&tr12, t->tr.p, t->tr.n);
@@ -593,22 +637,136 @@ static bool t12_handshake(T13 *t, const char *host, bool verify, char *err, int 
         return false;
       }
       rsa_nn = leaf.rsa_n.n; rsa_en = leaf.rsa_e.n;
-      if (rsa_nn < 64 || rsa_nn > 512 || rsa_en < 1 || rsa_en > 8) {
+      if (t->kx12 == 1 && (rsa_nn < 64 || rsa_nn > 512 || rsa_en < 1 || rsa_en > 8)) {
         for (int i = 0; i < cn; i++) free(cs[i].p);
         free(m.p);
         snprintf(err, es, "مفتاح RSA في الشهادة غير صالح");
         return false;
       }
-      memcpy(rsa_nb, leaf.rsa_n.p, (size_t)rsa_nn);
-      memcpy(rsa_eb, leaf.rsa_e.p, (size_t)rsa_en);
+      if (t->kx12 == 2 && leaf.ktype == 1 && (rsa_nn < 64 || rsa_nn > 512 || rsa_en < 1 || rsa_en > 8)) {
+        for (int i = 0; i < cn; i++) free(cs[i].p);
+        free(m.p);
+        snprintf(err, es, "مفتاح RSA في الشهادة غير صالح");
+        return false;
+      }
+      if (t->kx12 == 2 && leaf.ktype != 1 && leaf.ktype != 2) {
+        for (int i = 0; i < cn; i++) free(cs[i].p);
+        free(m.p);
+        snprintf(err, es, "نوع مفتاح الشهادة غير مدعوم لـECDHE");
+        return false;
+      }
+      if (leaf.ktype == 1) {
+        memcpy(rsa_nb, leaf.rsa_n.p, (size_t)rsa_nn);
+        memcpy(rsa_eb, leaf.rsa_e.p, (size_t)rsa_en);
+      }
       for (int i = 0; i < cn; i++) free(cs[i].p);
-      if (leaf.ktype != 1) {
+      if (t->kx12 == 1 && leaf.ktype != 1) {
         free(m.p);
         snprintf(err, es, "شهادة الخادم ليست RSA (مطلوب لـTLS 1.2 الاحتياطي)");
         return false;
       }
-    } else if (mt == 12 && (state == 1 || state == 2)) {
+    } else if (mt == 12 && t->kx12 == 2 && (state == 1 || state == 2)) {
       state = 2;
+      if (m.n < 4) { free(m.p); snprintf(err, es, "ServerKeyExchange مبتور"); return false; }
+      int ctype = m.p[0];
+      const uint8_t *spt = (const uint8_t *)m.p + 1;
+      int sptn = m.n - 1;
+      if (ctype != 3) { free(m.p); snprintf(err, es, ctype == 0 ? "الخادم طلب شهادة عميل (غير مدعوم)" : "نوع ServerKeyExchange غير مدعوم (%d)", ctype); return false; }
+      if (sptn < 3) { free(m.p); snprintf(err, es, "ServerKeyExchange ECParameters مبتور"); return false; }
+      int cid = (spt[0] << 8) | spt[1];
+      int gid = 0, pbn = 0;
+      const uint8_t *pb = NULL;
+      if (cid == 0x001D) gid = 0;
+      else if (cid == 0x0017) gid = 1;
+      else if (cid == 0x0018) gid = 2;
+      else { free(m.p); snprintf(err, es, "منحنى ECDHE غير مدعوم (0x%04X)", cid); return false; }
+      t->ecdhe_gid = gid;
+      pbn = spt[2];
+      if (3 + pbn > sptn) { free(m.p); snprintf(err, es, "ServerKeyExchange مبتور (نقطة)"); return false; }
+      pb = spt + 3;
+      int roff = 4 + pbn;
+      if (roff + 4 > m.n) { free(m.p); snprintf(err, es, "ServerKeyExchange مبتور (توقيع)"); return false; }
+      int salg = (m.p[roff] << 8) | m.p[roff + 1];
+      int slen = (m.p[roff + 2] << 8) | m.p[roff + 3];
+      if (roff + 4 + slen > m.n) { free(m.p); snprintf(err, es, "ServerKeyExchange مبتور (توقيع)"); return false; }
+      int alg_ok = 0;
+      for (int ai = 0; ai < 2 && t->sigalg12[ai] >= 0; ai++) if (t->sigalg12[ai] == salg) alg_ok = 1;
+      if (t->sigalg12[0] >= 0 && !alg_ok) { free(m.p); snprintf(err, es, "خوارزمية توقيع SKE غير مسموحة (0x%04X)", salg); return false; }
+      {
+        Buf sk;
+        buf_init(&sk);
+        buf_add(&sk, (const char *)t->crand12, 32);
+        buf_add(&sk, (const char *)t->srand12, 32);
+        buf_add(&sk, (const char *)spt - 1, 4 + pbn);
+        uint8_t skh[32];
+        sha256_raw((const uint8_t *)sk.p, (size_t)sk.n, skh);
+        free(sk.p);
+        if (leaf.ktype == 1) {
+          if (salg == 0x0401) {
+            if (!x509_rsa_verify(leaf.rsa_n.p, leaf.rsa_n.n, leaf.rsa_e.p, leaf.rsa_e.n, XH_SHA256, skh, 32, m.p + roff + 4, slen)) {
+              free(m.p);
+              snprintf(err, es, "فشل التحقق من توقيع ServerKeyExchange");
+              return false;
+            }
+          } else if (salg == 0x0804) {
+            if (!x509_rsa_pss_verify(leaf.rsa_n.p, leaf.rsa_n.n, leaf.rsa_e.p, leaf.rsa_e.n, XH_SHA256, skh, 32, m.p + roff + 4, slen)) {
+              free(m.p);
+              snprintf(err, es, "فشل التحقق من توقيع ServerKeyExchange (PSS)");
+              return false;
+            }
+          } else {
+            free(m.p);
+            snprintf(err, es, "خوارزمية توقيع SKE غير مدعومة (0x%04X)", salg);
+            return false;
+          }
+        } else if (leaf.ktype == 2 && gid == 1) {
+          XDer sd = {m.p + roff + 4, slen}, sq, ri, si;
+          unsigned char tt;
+          if (!xder_c(&sd, &tt, &sq) || tt != 0x30 || !xder_c(&sq, &tt, &ri) || tt != 0x02 || !xder_c(&sq, &tt, &si) || tt != 0x02) {
+            free(m.p);
+            snprintf(err, es, "توقيع ECDSA مشوه في ServerKeyExchange");
+            return false;
+          }
+          if (!xp256_ecdsa_verify(leaf.ec_q, leaf.ec_qlen, XH_SHA256, skh, 32, ri.p, ri.n, si.p, si.n)) {
+            free(m.p);
+            snprintf(err, es, "فشل التحقق من توقيع ServerKeyExchange");
+            return false;
+          }
+        } else {
+          free(m.p);
+          snprintf(err, es, "خوارزمية توقيع SKE غير مدعومة (0x%04X)", salg);
+          return false;
+        }
+      }
+      uint8_t sh[48];
+      int shn = 0;
+      if (gid == 0) {
+        x25519_core(sh, t->x_priv, pb);
+        uint8_t zz = 0;
+        for (int i = 0; i < 32; i++) zz |= sh[i];
+        if (!zz) { free(m.p); snprintf(err, es, "قناة X25519 فاسدة"); return false; }
+        shn = 32;
+      } else if (gid == 1) {
+        uint8_t Xfull[133];
+        int Xn = 0;
+        if (!xp256_decompress(pb, pbn, Xfull, &Xn)) { free(m.p); snprintf(err, es, "نقطة ECDHE P-256 فاسدة"); return false; }
+        shn = xp256_ecdh(Xfull, Xn, t->p_priv, sh) ? 32 : 0;
+      } else {
+        uint8_t Xfull[133];
+        int Xn = 0;
+        if (!ecbig_decompress(2, pb, pbn, Xfull, &Xn)) { free(m.p); snprintf(err, es, "نقطة ECDHE P-384 فاسدة"); return false; }
+        shn = ecbig_ecdh_shared(2, Xfull, Xn, t->g_priv, 48, sh);
+      }
+      if (shn <= 0) { free(m.p); snprintf(err, es, "فشل حساب سر ECDHE"); return false; }
+      if (shn <= 0 || shn > 48) { free(m.p); snprintf(err, es, "سر ECDHE فاسد"); return false; }
+      memset(t->ecdh12, 0, 48);
+      memcpy(t->ecdh12, sh, (size_t)shn);
+      t->ecdh12_len = shn;
+      memset(sh, 0, sizeof sh);
+    } else if (mt == 13) {
+      free(m.p);
+      snprintf(err, es, "الخادم طلب شهادة عميل (غير مدعوم)");
+      return false;
     } else if (mt == 14 && (state == 1 || state == 2)) {
       break;
     } else {
@@ -618,42 +776,67 @@ static bool t12_handshake(T13 *t, const char *host, bool verify, char *err, int 
     }
     free(m.p);
   }
-  pm[0] = 3; pm[1] = 3;
-  os_random(pm + 2, 46);
-  int bn = rsa_nn;
-  int boff = 0;
-  while (boff < bn - 1 && rsa_nb[boff] == 0) boff++;
-  bn -= boff;
-  if (bn < 64 || bn < 48 + 3) { snprintf(err, es, "مفتاح RSA صغير جدا (%d)", bn); return false; }
-  Big N, E, M, C;
-  big_from_bytes((const char *)(rsa_nb + boff), bn, &N);
-  big_from_bytes((const char *)rsa_eb, rsa_en, &E);
-  uint8_t *pmb = (uint8_t *)xalloc((size_t)bn);
-  pmb[0] = 0;
-  pmb[1] = 2;
-  int psn = bn - 3 - 48;
-  if (psn < 8) { snprintf(err, es, "مفتاح RSA صغير جدا"); free(pmb); return false; }
-  memset(pmb, 0, (size_t)bn);
-  pmb[0] = 0;
-  pmb[1] = 2;
-  os_random(pmb + 2, psn);
-  for (int i = 2; i < 2 + psn; i++) { while (pmb[i] == 0) os_random(pmb + i, 1); }
-  for (int i = 2; i < 2 + psn; i++) { while (pmb[i] == 0) os_random(pmb + i, 1); }
-  memcpy(pmb + bn - 48, pm, 48);
-  big_from_bytes((const char *)pmb, bn, &M);
-  C = big_modpow(&M, &E, &N);
-  int cn2 = bn;
-  uint8_t *cb = (uint8_t *)xalloc((size_t)cn2);
-  memset(cb, 0, (size_t)cn2);
-  ec_big_to_bytes(&C, cb, cn2);
+  uint8_t pmsecret[48];
+  int pmlen = 48;
+  if (t->kx12 == 2) {
+    memcpy(pmsecret, t->ecdh12, 48);
+    pmlen = t->ecdh12_len;
+    memset(t->ecdh12, 0, 48);
+  } else {
+    pm[0] = 3; pm[1] = 3;
+    os_random(pm + 2, 46);
+    int bn = rsa_nn;
+    int boff = 0;
+    while (boff < bn - 1 && rsa_nb[boff] == 0) boff++;
+    bn -= boff;
+    if (bn < 64 || bn < 48 + 3) { snprintf(err, es, "مفتاح RSA صغير جدا (%d)", bn); return false; }
+    Big N, E, M, C;
+    big_from_bytes((const char *)(rsa_nb + boff), bn, &N);
+    big_from_bytes((const char *)rsa_eb, rsa_en, &E);
+    uint8_t *pmb = (uint8_t *)xalloc((size_t)bn);
+    int psn = bn - 3 - 48;
+    if (psn < 8) { snprintf(err, es, "مفتاح RSA صغير جدا"); free(pmb); return false; }
+    memset(pmb, 0, (size_t)bn);
+    pmb[0] = 0;
+    pmb[1] = 2;
+    os_random(pmb + 2, psn);
+    for (int i = 2; i < 2 + psn; i++) { while (pmb[i] == 0) os_random(pmb + i, 1); }
+    memcpy(pmb + bn - 48, pm, 48);
+    big_from_bytes((const char *)pmb, bn, &M);
+    C = big_modpow(&M, &E, &N);
+    int cn2 = bn;
+    uint8_t *cb = (uint8_t *)xalloc((size_t)cn2);
+    memset(cb, 0, (size_t)cn2);
+    ec_big_to_bytes(&C, cb, cn2);
+    Buf ckex;
+    buf_init(&ckex);
+    buf_addc(&ckex, (char)((cn2 >> 8) & 255));
+    buf_addc(&ckex, (char)(cn2 & 255));
+    buf_add(&ckex, (const char *)cb, cn2);
+    free(cb);
+    free(pmb);
+    free(M.d); free(C.d); free(N.d); free(E.d);
+    memcpy(pmsecret, pm, 48);
+    memset(pm, 0, sizeof pm);
+    cke_n = ckex.n;
+    cke_body = (uint8_t *)xalloc((size_t)ckex.n);
+    memcpy(cke_body, ckex.p, (size_t)ckex.n);
+    free(ckex.p);
+  }
   Buf ckex;
   buf_init(&ckex);
-  buf_addc(&ckex, (char)((cn2 >> 8) & 255));
-  buf_addc(&ckex, (char)(cn2 & 255));
-  buf_add(&ckex, (const char *)cb, cn2);
-  free(cb);
-  free(pmb);
-  free(M.d); free(C.d); free(N.d); free(E.d);
+  if (t->kx12 == 2) {
+    const uint8_t *pub = NULL;
+    int pubn = 0;
+    if (t->ecdhe_gid == 0) { pub = t->x_pub; pubn = 32; }
+    else if (t->ecdhe_gid == 1) { pub = t->ecdh_pub; pubn = 65; }
+    else { pub = t->ecdh384_pub; pubn = 97; }
+    buf_addc(&ckex, (char)pubn);
+    buf_add(&ckex, (const char *)pub, pubn);
+  } else {
+    buf_add(&ckex, (const char *)cke_body, (size_t)cke_n);
+    free(cke_body);
+  }
   char mh4[4];
   mh4[0] = 0x10;
   mh4[1] = (char)((ckex.n >> 16) & 255); mh4[2] = (char)((ckex.n >> 8) & 255); mh4[3] = (char)(ckex.n & 255);
@@ -679,13 +862,13 @@ static bool t12_handshake(T13 *t, const char *host, bool verify, char *err, int 
   int wr1 = sock_write(t->fd, (const char *)rec1, (size_t)total1);
   free(rec1); free(ckex.p);
   if (wr1 != 0) { snprintf(err, es, "فشل إرسال ClientKeyExchange"); return false; }
-  t12_prf(t->master12, 48, pm, 48, "master secret", t->crand12, 32, t->srand12, 32);
+  t12_prf(t->master12, 48, pmsecret, pmlen, "master secret", t->crand12, 32, t->srand12, 32);
   if (t->ems12) {
     uint8_t emsh[32];
     sha256_raw((const uint8_t *)tr12.p, (size_t)tr12.n, emsh);
-    t12_prf(t->master12, 48, pm, 48, "extended master secret", emsh, 32, NULL, 0);
+    t12_prf(t->master12, 48, pmsecret, pmlen, "extended master secret", emsh, 32, NULL, 0);
   }
-  memset(pm, 0, sizeof pm);
+  memset(pmsecret, 0, sizeof pmsecret);
   {
     uint8_t cc2[6] = {0x14, 3, 3, 0, 1, 1};
     int wr2 = sock_write(t->fd, (const char *)cc2, 6);
@@ -755,11 +938,13 @@ static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *
   crv_init();
   os_random(t->x_priv, 32);
   os_random(t->p_priv, 32);
+  os_random(t->g_priv, 48);
   os_random(t->ch_rand, 32);
   os_random(t->sid, 32);
   static const uint8_t base9[32] = {9};
   x25519_core(t->x_pub, t->x_priv, base9);
   xp256_pubkey(t->p_priv, t->p_pub);
+  t12_ecdh_gen(t);
 
   Buf ex;
   buf_init(&ex);
@@ -796,6 +981,9 @@ static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *
     buf_addc(&ks, 0x00); buf_addc(&ks, 0x1D);
     buf_addc(&ks, 0); buf_addc(&ks, 32);
     buf_add(&ks, (const char *)t->x_pub, 32);
+    buf_addc(&ks, 0x00); buf_addc(&ks, 0x17);
+    buf_addc(&ks, 0); buf_addc(&ks, 65);
+    buf_add(&ks, (const char *)t->p_pub, 65);
     uint8_t ln2[2] = {(uint8_t)(ks.n >> 8), (uint8_t)ks.n};
     Buf kd;
     buf_init(&kd);
@@ -834,11 +1022,12 @@ static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *
   buf_add(&bh, (const char *)t->ch_rand, 32);
   buf_addc(&bh, 32);
   buf_add(&bh, (const char *)t->sid, 32);
-  buf_addc(&bh, 0); buf_addc(&bh, 8);
+  buf_addc(&bh, 0); buf_addc(&bh, 10);
   buf_addc(&bh, 0x13); buf_addc(&bh, 0x01);
   buf_addc(&bh, 0x13); buf_addc(&bh, 0x03);
   buf_addc(&bh, 0); buf_addc(&bh, 0x3C);
   buf_addc(&bh, 0); buf_addc(&bh, 0x3D);
+  buf_addc(&bh, 0xC0); buf_addc(&bh, 0x27);
   buf_addc(&bh, 1); buf_addc(&bh, 0);
   buf_addc(&bh, (char)((ex.n >> 8) & 255)); buf_addc(&bh, (char)(ex.n & 255));
   buf_add(&bh, ex.p, ex.n);

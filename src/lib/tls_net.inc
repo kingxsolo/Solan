@@ -65,6 +65,8 @@ static bool tls_load(void) {
 static void tls_set_verify_paths(void *ctx) {
   tl.SSL_CTX_set_default_verify_paths(ctx);
   if (!tl.SSL_CTX_load_verify_locations) return;
+  const char *env = getenv("SOLAN_CA_BUNDLE");
+  if (env && *env && tl.SSL_CTX_load_verify_locations(ctx, env, NULL)) return;
   static char b1[PATH_MAX];
   const char *pf = getenv("ProgramFiles");
   const char *bundles[4]; int n = 0;
