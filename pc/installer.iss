@@ -60,7 +60,7 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\سولان (طرفية تفاعلية)"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
+Name: "{group}\سولان"; Filename: "{app}\solan.exe"; Comment: "سولان — لغة برمجة عربية"
 Name: "{group}\دليل سولان (README)"; Filename: "{app}\README.md"
 Name: "{group}\إزالة تثبيت سولان"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\سولان"; Filename: "{app}\solan.exe"; Tasks: desktopicon

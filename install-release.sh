@@ -19,7 +19,6 @@ case "$OS" in
       *)
         echo "لا يوجد إصدار جاهز للمعمارية $ARCH."
         echo "في ترمكس أو ARM استعمل البناء من المصدر (دقائق قليلة):"
-        echo "  pkg install -y clang git 2>/dev/null"
         echo "  git clone https://github.com/$REPO && cd Solan && sh install.sh"
         exit 1
         ;;
