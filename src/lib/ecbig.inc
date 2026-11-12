@@ -275,22 +275,24 @@ static int ecbig_ecdh_shared(int id, const uint8_t *peer, int plen, const uint8_
   big_from_bytes((const char *)peer + 1, cv->bytes, &qx);
   big_from_bytes((const char *)peer + 1 + cv->bytes, cv->bytes, &qy);
   if (!ec_on_curve(cv, &qx, &qy)) { free(qx.d); free(qy.d); return 0; }
+  Big K;
+  big_from_bytes((const char *)priv, privn, &K);
+  Big q, r;
+  bmag_divmod(&K, &cv->n, &q, &r);
+  free(q.d); free(K.d);
   XECPt Q;
   Q.x = qx; Q.y = qy; Q.z = big_new(1);
   XECPt R;
-  ec_pt_mul(cv, &Q, priv, privn, &R);
+  ec_pt_mul(cv, &Q, (const uint8_t *)r.d, r.n * 4, &R);
+  free(r.d);
   ec_pt_free(&Q);
   if (ec_pt_is_inf(&R)) { ec_pt_free(&R); return 0; }
   uint8_t *xb = (uint8_t *)xalloc((size_t)cv->bytes);
   if (!ec_pt_affine_x(cv, &R, xb)) { ec_pt_free(&R); free(xb); return 0; }
   ec_pt_free(&R);
-  int o = 0;
-  while (o < cv->bytes && xb[o] == 0) o++;
-  memcpy(out, xb + o, (size_t)(cv->bytes - o));
-  int rn = cv->bytes - o;
+  memcpy(out, xb, (size_t)cv->bytes);
   free(xb);
-  memset(out + rn, 0, (size_t)(48 - rn));
-  return rn;
+  return cv->bytes;
 }
 
 static bool ecbig_ecdsa_verify(int id, const uint8_t *q, int qlen, const uint8_t *hash, int hlen, const uint8_t *rb, int rlen, const uint8_t *sb, int slen) {
