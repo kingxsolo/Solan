@@ -132,68 +132,6 @@ NAT(j_dec) {
   Value v = jval(&j, 0); jws(&j); if (j.err || j.p != j.end) FAIL("جيسون غير صالح"); *res = v; return true;
 }
 
-static void shq(Buf *b, const char *s, int n) {
-#if SOLAN_WIN
-
-  buf_addc(b, '"');
-  for (int i = 0; i < n; i++) { if (s[i] == '"') buf_add(b, "\\\"", 2); else buf_addc(b, s[i]); }
-  buf_addc(b, '"');
-#else
-  buf_addc(b, '\'');
-  for (int i = 0; i < n; i++) { if (s[i] == '\'') buf_add(b, "'\\''", 4); else buf_addc(b, s[i]); }
-  buf_addc(b, '\'');
-#endif
-}
-static bool net_fetch_curl(int argc, Value *a, Value *res) {
-  PERM(PM_NET);
-  STRA(0); Buf cmd; buf_init(&cmd);
-#if SOLAN_WIN
-  buf_fmt(&cmd, "curl.exe -sS -L --max-time 60 -w \"\\n%%{http_code}\"");
-#else
-  buf_fmt(&cmd, "curl -sS -L --max-time 60 -w '\\n%%{http_code}'");
-#endif
-  Str *method = NULL; char tmpl[64] = ""; Value body = NIL; bool json_body = false;
-  if (argc > 1 && IS_T(a[1], O_MAP)) {
-    Dict *o = &AS_MAP(a[1])->d; Value v;
-    if (mget(o, KN("طريقة"), &v) && IS_T(v, O_STR)) method = AS_STR(v);
-    if (mget(o, KN("رؤوس"), &v) && IS_T(v, O_MAP)) {
-      Dict *h = &AS_MAP(v)->d;
-      for (int i = 0; i < h->n; i++) {
-        if (h->e[i].k.t == V_EMPTY) continue; Str *hk = tostr(h->e[i].k), *hv = tostr(h->e[i].v);
-        Buf hb; buf_init(&hb); buf_fmt(&hb, "%s: %s", hk->chars, hv->chars); buf_add(&cmd, " -H ", 4); shq(&cmd, hb.p, hb.n); free(hb.p);
-      }
-    }
-    if (mget(o, KN("جسم"), &v) && !IS_NIL(v)) { body = v; json_body = IS_T(v, O_MAP) || IS_T(v, O_LIST); }
-    if (mget(o, KN("بروكسي"), &v) && IS_T(v, O_STR)) { buf_add(&cmd, " -x ", 4); shq(&cmd, AS_STR(v)->chars, AS_STR(v)->len); }
-  }
-  if (method) { buf_add(&cmd, " -X ", 4); shq(&cmd, method->chars, method->len); }
-  if (!IS_NIL(body)) {
-    Buf bb; buf_init(&bb); if (json_body) json_enc(body, &bb, 0, 0); else { Str *s = tostr(body); buf_add(&bb, s->chars, s->len); }
-    snprintf(tmpl, sizeof tmpl, "%s/solan_XXXXXX", os_tmpdir()); int fd = os_mkstemp(tmpl);
-    if (fd < 0) { free(bb.p); free(cmd.p); FAIL("تعذّر إنشاء ملف مؤقت"); }
-    if (bb.n) { ssize_t w = write(fd, bb.p, bb.n); (void)w; } close(fd); free(bb.p);
-    if (json_body) {
-#if SOLAN_WIN
-      buf_add(&cmd, " -H \"Content-Type: application/json\"", 36);
-#else
-      buf_add(&cmd, " -H 'Content-Type: application/json'", 35);
-#endif
-    }
-    buf_add(&cmd, " --data-binary @", 16); shq(&cmd, tmpl, (int)strlen(tmpl));
-  }
-  buf_add(&cmd, " ", 1); shq(&cmd, AS_STR(a[0])->chars, AS_STR(a[0])->len); buf_add(&cmd, " 2>&1", 5);
-  fflush(stdout); FILE *p = popen(buf_cstr(&cmd), "r"); free(cmd.p);
-  if (!p) { if (tmpl[0]) remove(tmpl); FAIL("تعذّر تشغيل curl (ثبّته: pkg install curl)"); }
-  Buf out; buf_init(&out); char tmp[4096]; size_t n; while ((n = fread(tmp, 1, sizeof tmp, p)) > 0) buf_add(&out, tmp, (int)n);
-  int st = pclose(p); if (tmpl[0]) remove(tmpl);
-  const char *s = buf_cstr(&out); int len = out.n, cut = len;
-  while (cut > 0 && s[cut - 1] != '\n') cut--;
-  int code = 0; if (cut > 0) code = atoi(s + cut);
-  if (cut == 0 || (st != 0 && code == 0)) { Str *m = intern(s, len); free(out.p); vm.exc = OBJV(intern_c("فشل الاتصال: ")); (void)m; Buf eb; buf_init(&eb); buf_fmt(&eb, "فشل الاتصال: %s", m->chars); vm.exc = mkstr(eb.p, eb.n); free(eb.p); return false; }
-  Map *r = new_map(); dset(&r->d, KX("حالة"), NUMV(code)); dset(&r->d, KN("جسم"), mkstr(s, cut - 1 > 0 ? cut - 1 : 0));
-  dset(&r->d, KN("ناجح"), BOOLV(code >= 200 && code < 300)); free(out.p); *res = OBJV(r); return true;
-}
-
 static uint32_t rol32(uint32_t x, int s) { return (x << s) | (x >> (32 - s)); }
 static uint32_t ror32(uint32_t x, int s) { return (x >> s) | (x << (32 - s)); }
 static void sha1_blk(uint32_t *h, const uint8_t *p) {

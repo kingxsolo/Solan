@@ -899,7 +899,7 @@ static bool t12_handshake(T13 *t, const char *host, bool verify, char *err, int 
   }
   return true;
 }
-static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *o, char *err, int es) {
+static bool t13_handshake(T13 *t, const char *host, bool verify, char *err, int es) {
   crv_init();
   os_random(t->x_priv, 32);
   os_random(t->p_priv, 32);
@@ -957,19 +957,6 @@ static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *
     t13_ext(&ex, 51, (const uint8_t *)kd.p, kd.n);
     free(ks.p);
     free(kd.p);
-  }
-  if (o && o->alpn && *o->alpn) {
-    unsigned char w[128];
-    int wn = alpn_wire(o->alpn, w, (int)sizeof w);
-    if (wn > 0) {
-      uint8_t hd[2] = {(uint8_t)(wn >> 8), (uint8_t)wn};
-      Buf ad;
-      buf_init(&ad);
-      buf_add(&ad, (const char *)hd, 2);
-      buf_add(&ad, (const char *)w, wn);
-      t13_ext(&ex, 16, (const uint8_t *)ad.p, ad.n);
-      free(ad.p);
-    }
   }
   t13_ext(&ex, 23, NULL, 0);
   {
@@ -1191,7 +1178,7 @@ static bool t13_handshake(T13 *t, const char *host, bool verify, const TlsOpts *
   t->hs_done = 1;
   return true;
 }
-static bool t13_wrap_client(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es) {
+static bool t13_wrap_client(int fd, const char *host, bool verify, char *err, int es) {
   if (fd < 0 || fd >= MAXFD) { snprintf(err, es, "معرف مقبس غير صالح"); return false; }
   T13 *t = (T13 *)xalloc(sizeof(T13));
   memset(t, 0, sizeof(*t));
@@ -1200,7 +1187,7 @@ static bool t13_wrap_client(int fd, const char *host, bool verify, const TlsOpts
   buf_init(&t->dec);
   buf_init(&t->hsb);
   t->fd = fd;
-  if (!t13_handshake(t, host, verify, o, err, es)) {
+  if (!t13_handshake(t, host, verify, err, es)) {
     free(t->tr.p); free(t->raw.p); free(t->dec.p); free(t->hsb.p);
     free(t);
     return false;

@@ -130,7 +130,7 @@ static bool read_body_stream(int fd, Map *hm, bool nobody, Value callback, bool 
   return read_stream_payload(fd, -1, callback, collect, body, &total, callback_failed);
 }
 
-static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value callback, bool collect_stream_body, bool honly, const char *proxy, const TlsOpts *topt, Value *res) {
+static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *body0, bool bodyjson, int tmo, bool verify, int maxredir, Value callback, bool collect_stream_body, bool honly, const char *proxy, Value *res) {
   bool streaming = !IS_NIL(callback);
   char method[16]; snprintf(method, sizeof method, "%s", method0); char url[4096]; snprintf(url, sizeof url, "%s", url0); Str *body = body0;
   for (int hop = 0;; hop++) {
@@ -147,7 +147,7 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
       fd = tcp_connect(u.host, u.port, tmo, err, sizeof err);
       if (fd < 0) { rt_error("%s", err); return 1; }
     }
-    if (u.tls && !tls_wrap_client_ex(fd, u.host, verify, topt, err, sizeof err)) { conn_close(fd); rt_error("%s", err); return 1; }
+    if (u.tls && !tls_wrap_client(fd, u.host, verify, err, sizeof err)) { conn_close(fd); rt_error("%s", err); return 1; }
     tmo_ms[fd] = tmo;
     Buf rq; buf_init(&rq); buf_fmt(&rq, "%s %s HTTP/1.1\r\n", method, u.path);
     if (honly) {
@@ -211,7 +211,6 @@ static int http_request(const char *method0, const char *url0, Dict *hdrs, Str *
     vm.sp--; free(bd.p); *res = OBJV(r2); return 0;
   }
 }
-static bool net_fetch_curl(int argc, Value *a, Value *res);
 static const char *mime_of(const char *p) {
   const char *d = strrchr(p, '.'); if (!d) return "application/octet-stream"; d++;
   static const struct { const char *e, *m; } t[] = {{"png", "image/png"}, {"jpg", "image/jpeg"}, {"jpeg", "image/jpeg"}, {"gif", "image/gif"}, {"webp", "image/webp"}, {"pdf", "application/pdf"},
@@ -264,23 +263,10 @@ NAT(net_fetch) {
   Value hfo = optv(argc, a, 1, "رؤوس_فقط"), px = optv(argc, a, 1, "بروكسي");
   bool honly = !IS_NIL(hfo) && !falsey(hfo);
   const char *proxy = IS_T(px, O_STR) ? AS_STR(px)->chars : NULL;
-  TlsOpts topt; memset(&topt, 0, sizeof topt); bool have_tls = false;
-  {
-    Value fp = optv(argc, a, 1, "بصمة");
-    if (IS_T(fp, O_STR)) {
-      if (!tls_opts_preset(AS_STR(fp)->chars, &topt)) { vm.sp--; if (hm2) vm.sp--; FAIL("بصمة غير معروفة: %s (المتاح: chrome وandroid وfirefox وcurl)", AS_STR(fp)->chars); }
-      have_tls = true;
-    }
-    Value c12 = optv(argc, a, 1, "تشفيرات"), c13 = optv(argc, a, 1, "تشفيرات_13"), gr = optv(argc, a, 1, "مجموعات"), al = optv(argc, a, 1, "alpn"), mn = optv(argc, a, 1, "tls_ادنى");
-    if (IS_T(c12, O_STR)) { topt.ciphers = AS_STR(c12)->chars; have_tls = true; }
-    if (IS_T(c13, O_STR)) { topt.ciphersuites = AS_STR(c13)->chars; have_tls = true; }
-    if (IS_T(gr, O_STR)) { topt.groups = AS_STR(gr)->chars; have_tls = true; }
-    if (IS_T(al, O_STR)) { topt.alpn = AS_STR(al)->chars; have_tls = true; }
-    if (IS_NUM(mn)) { double v = mn.as.n; if (v >= 1.0 && v <= 1.4) { topt.minver = 0x0300 + (int)((v - 1.0) * 10) + 1; have_tls = true; } }
-  }
-  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, NIL, false, honly, proxy, have_tls ? &topt : NULL, res);
+  { static const char *gone[] = {"بصمة", "تشفيرات", "تشفيرات_13", "مجموعات", "tls_ادنى", "alpn"};
+    for (int i = 0; i < 6; i++) { Value g = optv(argc, a, 1, gone[i]); if (!IS_NIL(g) && !falsey(g)) FAIL("خيار '%s' أُزيل في 1.3.1 مع حذف مسار OpenSSL — العميل الخالص يختار التشفيرات تلقائياً", gone[i]); } }
+  int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js, IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5, NIL, false, honly, proxy, res);
   vm.sp--; if (hm2) vm.sp--;
-  if (r == 2) return net_fetch_curl(argc, a, res);
   return r == 0;
 }
 
@@ -314,25 +300,12 @@ NAT(net_fetch_stream) {
   Value hfo = optv(argc, a, 2, "رؤوس_فقط"), px = optv(argc, a, 2, "بروكسي");
   bool honly = !IS_NIL(hfo) && !falsey(hfo);
   const char *proxy = IS_T(px, O_STR) ? AS_STR(px)->chars : NULL;
-  TlsOpts topt; memset(&topt, 0, sizeof topt); bool have_tls = false;
-  {
-    Value fp = optv(argc, a, 2, "بصمة");
-    if (IS_T(fp, O_STR)) {
-      if (!tls_opts_preset(AS_STR(fp)->chars, &topt)) FAIL("بصمة غير معروفة: %s (المتاح: chrome وandroid وfirefox وcurl)", AS_STR(fp)->chars);
-      have_tls = true;
-    }
-    Value c12 = optv(argc, a, 2, "تشفيرات"), c13 = optv(argc, a, 2, "تشفيرات_13"), gr = optv(argc, a, 2, "مجموعات"), al = optv(argc, a, 2, "alpn"), mn = optv(argc, a, 2, "tls_ادنى");
-    if (IS_T(c12, O_STR)) { topt.ciphers = AS_STR(c12)->chars; have_tls = true; }
-    if (IS_T(c13, O_STR)) { topt.ciphersuites = AS_STR(c13)->chars; have_tls = true; }
-    if (IS_T(gr, O_STR)) { topt.groups = AS_STR(gr)->chars; have_tls = true; }
-    if (IS_T(al, O_STR)) { topt.alpn = AS_STR(al)->chars; have_tls = true; }
-    if (IS_NUM(mn)) { double v = mn.as.n; if (v >= 1.0 && v <= 1.4) { topt.minver = 0x0300 + (int)((v - 1.0) * 10) + 1; have_tls = true; } }
-  }
+  { static const char *gone[] = {"بصمة", "تشفيرات", "تشفيرات_13", "مجموعات", "tls_ادنى", "alpn"};
+    for (int i = 0; i < 6; i++) { Value g = optv(argc, a, 2, gone[i]); if (!IS_NIL(g) && !falsey(g)) FAIL("خيار '%s' أُزيل في 1.3.1 مع حذف مسار OpenSSL — العميل الخالص يختار التشفيرات تلقائياً", gone[i]); } }
   int r = http_request(method, AS_STR(a[0])->chars, IS_T(h, O_MAP) ? &AS_MAP(h)->d : NULL, body, js,
     IS_NUM(tm) ? (int)(tm.as.n * 1000) : 60000, IS_NIL(vf) || !falsey(vf), IS_NUM(rd) ? (int)rd.as.n : 5,
-    callback, collect, honly, proxy, have_tls ? &topt : NULL, res);
+    callback, collect, honly, proxy, res);
   vm.sp--; if (hm2) vm.sp--;
-  if (r == 2) FAIL("جلب_متدفق عبر HTTPS يحتاج OpenSSL 3 وقت التشغيل؛ لا يستخدم fallback مجمّعاً كي لا يفقد التدفق الحي");
   return r == 0;
 }
 
@@ -406,8 +379,10 @@ static void handle_conn(int c, const char *ip, Value handler) {
 NAT(net_serve) {
   PERM(PM_NET);
   NUMA(0); if (!(IS_T(a[1], O_CLO) || IS_T(a[1], O_NAT) || IS_T(a[1], O_BOUND))) FAIL("الخادم يحتاج دالة معالجة");
-  Value ad = optv(argc, a, 2, "عنوان"), ce = optv(argc, a, 2, "شهادة"), ke = optv(argc, a, 2, "مفتاح"), mx = optv(argc, a, 2, "اقصى_طلبات"), fk = optv(argc, a, 2, "عمليات"); char err[300];
-  int lfd = listen_on((int)a[0].as.n, IS_T(ad, O_STR) ? AS_STR(ad)->chars : NULL, IS_T(ce, O_STR) ? AS_STR(ce)->chars : NULL, IS_T(ke, O_STR) ? AS_STR(ke)->chars : NULL, err, sizeof err);
+  Value ad = optv(argc, a, 2, "عنوان"), mx = optv(argc, a, 2, "اقصى_طلبات"), fk = optv(argc, a, 2, "عمليات"); char err[300];
+  { Value ce = optv(argc, a, 2, "شهادة"), ke = optv(argc, a, 2, "مفتاح");
+    if ((!IS_NIL(ce) && !falsey(ce)) || (!IS_NIL(ke) && !falsey(ke))) FAIL("خادم TLS غير مدمج: عميل TLS الخالص يدعم الاتصال الصادر فقط (لا خيارات شهادة/مفتاح)"); }
+  int lfd = listen_on((int)a[0].as.n, IS_T(ad, O_STR) ? AS_STR(ad)->chars : NULL, err, sizeof err);
   if (lfd < 0) FAIL("%s", err);
   bool forkmode = !IS_NIL(fk) && !falsey(fk);
 #if SOLAN_FORK
@@ -424,7 +399,7 @@ NAT(net_serve) {
       if (pid == 0) { close(lfd); handle_conn(c, ip, a[1]); fflush(stdout); _exit(0); }
 #else
 #endif
-      if (ssl_of[c]) tl.SSL_free(ssl_of[c]); close(c); fd_setup(c); served++; continue;
+      close(c); fd_setup(c); served++; continue;
     }
     handle_conn(c, ip, a[1]); served++;
   }

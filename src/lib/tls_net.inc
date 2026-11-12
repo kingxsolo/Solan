@@ -1,101 +1,20 @@
-typedef struct {
-  void *h; const void *(*TLS_client_method)(void); const void *(*TLS_server_method)(void);
-  void *(*SSL_CTX_new)(const void *); int (*SSL_CTX_set_default_verify_paths)(void *); void (*SSL_CTX_set_verify)(void *, int, void *);
-  void *(*SSL_new)(void *); int (*SSL_set_fd)(void *, int); long (*SSL_ctrl)(void *, int, long, void *);
-  int (*SSL_set1_host)(void *, const char *); int (*SSL_connect)(void *); int (*SSL_accept)(void *);
-  int (*SSL_read)(void *, void *, int); int (*SSL_write)(void *, const void *, int); int (*SSL_shutdown)(void *);
-  void (*SSL_free)(void *); int (*SSL_get_error)(const void *, int); int (*SSL_pending)(const void *);
-  int (*SSL_CTX_use_certificate_chain_file)(void *, const char *); int (*SSL_CTX_use_PrivateKey_file)(void *, const char *, int);
-
-  int (*SSL_CTX_set_cipher_list)(void *, const char *); int (*SSL_CTX_set_ciphersuites)(void *, const char *);
-  int (*SSL_CTX_set1_groups_list)(void *, const char *); int (*SSL_set_alpn_protos)(void *, const unsigned char *, unsigned int);
-  void (*SSL_CTX_free)(void *); int (*SSL_CTX_load_verify_locations)(void *, const char *, const char *);
-} TLSLib;
-static TLSLib tl; static int tls_state = 0; static void *ctx_verify, *ctx_noverify;
-static void *ssl_of[MAXFD]; static int tmo_ms[MAXFD]; static unsigned char fflag[MAXFD]; static Buf rbuf[MAXFD]; static void *srv_ctx[MAXFD];
+static int tmo_ms[MAXFD]; static unsigned char fflag[MAXFD]; static Buf rbuf[MAXFD];
 static void *t13_of[MAXFD];
 static int t13_read(int fd, char *buf, size_t n);
 static int t13_write(int fd, const char *d, size_t n);
 static int t13_buffered(int fd);
 static void t13_close(int fd);
 
-#if SOLAN_WIN
-#define TLS_HINT "نزّل OpenSSL 3 (مثلًا: winget install ShiningLight.OpenSSL.Light) أو ضع libssl-3-x64.dll بجوار solan.exe"
-#elif SOLAN_MAC
-#define TLS_HINT "ثبّت: brew install openssl@3"
-#elif defined(__ANDROID__)
-#define TLS_HINT "ثبّت: pkg install openssl"
-#else
-#define TLS_HINT "ثبّت libssl: apt install libssl3 | dnf install openssl-libs | pacman -S openssl | apk add openssl | pkg install openssl"
-#endif
-static bool tls_try(const char *n) { if (!tl.h) tl.h = dlopen(n, RTLD_NOW | RTLD_GLOBAL); return tl.h != NULL; }
-static bool tls_load(void) {
-  if (tls_state) return tls_state > 0;
-
-  { const char *e = getenv("SOLAN_LIBSSL"); if (e && *e) tls_try(e); }
-  #if SOLAN_WIN
-  static const char *names[] = {"libssl-3-x64.dll", "libssl-3.dll", "libssl-1_1-x64.dll", "libssl-1_1.dll", NULL};
-#else
-
-  { const char *pf = getenv("PREFIX"); if (pf && *pf && !tl.h) { char b[PATH_MAX]; snprintf(b, sizeof b, "%s/lib/libssl.so.3", pf); tls_try(b); } }
-  static const char *names[] = {
-    "libssl.so.3", "libssl.so.1.1", "libssl.so.30", "libssl.so.111", "libssl.so",
-    "/usr/lib/x86_64-linux-gnu/libssl.so.3", "/usr/lib/aarch64-linux-gnu/libssl.so.3", "/usr/lib/arm-linux-gnueabihf/libssl.so.3",
-    "/usr/lib64/libssl.so.3", "/usr/lib/libssl.so.3", "/usr/local/lib/libssl.so.3", "/lib/libssl.so.3",
-    "libssl.3.dylib", "/opt/homebrew/lib/libssl.3.dylib", "/usr/local/lib/libssl.3.dylib",
-    "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib", "/usr/local/opt/openssl@3/lib/libssl.3.dylib", NULL};
-#endif
-  for (int i = 0; names[i] && !tl.h; i++) tls_try(names[i]);
-  if (!tl.h) { tls_state = -1; return false; }
-#define LS(n) do { *(void **)&tl.n = dlsym(tl.h, #n); if (!tl.n) { tls_state = -1; return false; } } while (0)
-  LS(TLS_client_method); LS(TLS_server_method); LS(SSL_CTX_new); LS(SSL_CTX_set_default_verify_paths); LS(SSL_CTX_set_verify);
-  LS(SSL_new); LS(SSL_set_fd); LS(SSL_ctrl); LS(SSL_connect); LS(SSL_accept); LS(SSL_read); LS(SSL_write); LS(SSL_shutdown);
-  LS(SSL_free); LS(SSL_get_error); LS(SSL_pending); LS(SSL_CTX_use_certificate_chain_file); LS(SSL_CTX_use_PrivateKey_file);
-  *(void **)&tl.SSL_set1_host = dlsym(tl.h, "SSL_set1_host");
-  *(void **)&tl.SSL_CTX_set_cipher_list = dlsym(tl.h, "SSL_CTX_set_cipher_list");
-  *(void **)&tl.SSL_CTX_set_ciphersuites = dlsym(tl.h, "SSL_CTX_set_ciphersuites");
-  *(void **)&tl.SSL_CTX_set1_groups_list = dlsym(tl.h, "SSL_CTX_set1_groups_list");
-  *(void **)&tl.SSL_set_alpn_protos = dlsym(tl.h, "SSL_set_alpn_protos");
-  *(void **)&tl.SSL_CTX_free = dlsym(tl.h, "SSL_CTX_free");
-  *(void **)&tl.SSL_CTX_load_verify_locations = dlsym(tl.h, "SSL_CTX_load_verify_locations");
-  tls_state = 1; return true;
-}
-
-
-static void tls_set_verify_paths(void *ctx) {
-  tl.SSL_CTX_set_default_verify_paths(ctx);
-  if (!tl.SSL_CTX_load_verify_locations) return;
-  const char *env = getenv("SOLAN_CA_BUNDLE");
-  if (env && *env && tl.SSL_CTX_load_verify_locations(ctx, env, NULL)) return;
-  static char b1[PATH_MAX];
-  const char *pf = getenv("ProgramFiles");
-  const char *bundles[4]; int n = 0;
-  if (pf && *pf) { snprintf(b1, sizeof b1, "%s/Git/mingw64/etc/ssl/certs/ca-bundle.crt", pf); bundles[n++] = b1; }
-  bundles[n++] = "/etc/ssl/certs/ca-certificates.crt";
-  bundles[n++] = "/etc/pki/tls/certs/ca-bundle.crt";
-  bundles[n] = NULL;
-  for (int i = 0; i < n; i++) if (tl.SSL_CTX_load_verify_locations(ctx, bundles[i], NULL)) return;
-}
-static void *get_ctx(bool verify) {
-  void **c = verify ? &ctx_verify : &ctx_noverify;
-  if (!*c) {
-    void *x = tl.SSL_CTX_new(tl.TLS_client_method()); if (!x) return NULL;
-    if (verify) { tls_set_verify_paths(x); tl.SSL_CTX_set_verify(x, 1, NULL); } else tl.SSL_CTX_set_verify(x, 0, NULL);
-    *c = x;
-  }
-  return *c;
-}
 static void fd_setup(int fd) {
   if (fd < 0 || fd >= MAXFD) return;
-  ssl_of[fd] = NULL; t13_of[fd] = NULL; tmo_ms[fd] = -1; fflag[fd] = 0; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0; srv_ctx[fd] = NULL;
+  t13_of[fd] = NULL; tmo_ms[fd] = -1; fflag[fd] = 0; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0;
 }
 static void conn_close(int fd) {
   if (fd < 0) return;
-  if (fd < MAXFD && t13_of[fd]) { t13_close(fd); }
-  else if (fd < MAXFD && ssl_of[fd]) { tl.SSL_shutdown(ssl_of[fd]); tl.SSL_free(ssl_of[fd]); }
+  if (fd < MAXFD && t13_of[fd]) t13_close(fd);
   close(fd); fd_setup(fd);
 }
-static bool fd_buffered(int fd) { return rbuf[fd].n > 0 || (ssl_of[fd] && tl.SSL_pending(ssl_of[fd]) > 0) || t13_buffered(fd); }
+static bool fd_buffered(int fd) { return rbuf[fd].n > 0 || t13_buffered(fd); }
 
 static ssize_t sock_read(int fd, char *buf, size_t n) {
   int tmo = tmo_ms[fd];
@@ -125,40 +44,18 @@ static int sock_write(int fd, const char *d, size_t n) {
 }
 static ssize_t conn_read(int fd, char *buf, size_t n) {
   if (t13_of[fd]) return t13_read(fd, buf, n);
-  void *ssl = ssl_of[fd]; int tmo = tmo_ms[fd];
-  if (tmo >= 0 && !(ssl && tl.SSL_pending(ssl) > 0)) {
+  int tmo = tmo_ms[fd];
+  if (tmo >= 0) {
     struct pollfd p = {fd, POLLIN, 0}; int pr; do pr = poll(&p, 1, tmo); while (pr < 0 && errno == EINTR);
     if (pr == 0) return -2; if (pr < 0) return -1;
   }
   if (fflag[fd] & 8) { ssize_t r; do r = read(fd, buf, n); while (r < 0 && errno == EINTR); if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -2; return r; }
-  if (ssl) {
-    for (;;) {
-      int r = tl.SSL_read(ssl, buf, n > 1 << 20 ? 1 << 20 : (int)n); if (r > 0) return r;
-      int e = tl.SSL_get_error(ssl, r); if (e == 6) return 0;
-      if (e == 2 || e == 3) {
-        if (tmo >= 0 || (fflag[fd] & 4)) return -2;
-        struct pollfd p = {fd, e == 2 ? POLLIN : POLLOUT, 0}; poll(&p, 1, -1); continue;
-      }
-      return e == 5 ? 0 : -1;
-    }
-  }
   ssize_t r; do r = recv(fd, buf, n, 0); while (r < 0 && errno == EINTR);
   if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -2;
   return r;
 }
 static int conn_write(int fd, const char *d, size_t n) {
   if (t13_of[fd]) return t13_write(fd, d, n);
-  void *ssl = ssl_of[fd];
-  if (ssl) {
-    size_t off = 0;
-    while (off < n) {
-      int w = tl.SSL_write(ssl, d + off, (int)(n - off > (1 << 20) ? (1 << 20) : n - off)); if (w > 0) { off += w; continue; }
-      int e = tl.SSL_get_error(ssl, w);
-      if (e == 2 || e == 3) { struct pollfd p = {fd, e == 2 ? POLLIN : POLLOUT, 0}; poll(&p, 1, 30000); continue; }
-      return -1;
-    }
-    return 0;
-  }
   return sock_write(fd, d, n);
 }
 static int rb_fill(int fd) { char tmp[16384]; ssize_t r = conn_read(fd, tmp, sizeof tmp); if (r > 0) buf_add(&rbuf[fd], tmp, (int)r); return (int)r; }
@@ -305,87 +202,12 @@ static bool proxy_tunnel(int fd, const char *proxy, const char *host, int port, 
   return true;
 }
 
-typedef struct {
-  const char *ciphers;
-  const char *ciphersuites;
-  const char *groups;
-  const char *alpn;
-  int minver, maxver;
-} TlsOpts;
-static bool tls_opts_preset(const char *name, TlsOpts *o) {
-  memset(o, 0, sizeof *o);
-  if (!strcmp(name, "chrome") || !strcmp(name, "android")) {
-    o->minver = 0x0303; o->maxver = 0x0304;
-    o->ciphers = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384";
-    o->ciphersuites = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
-    o->groups = "X25519:P-256:P-384";
-    o->alpn = "http/1.1";
-    return true;
-  }
-  if (!strcmp(name, "firefox")) {
-    o->minver = 0x0303; o->maxver = 0x0304;
-    o->ciphers = "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA";
-    o->ciphersuites = "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384";
-    o->groups = "X25519:P-256:P-384:P-521";
-    o->alpn = "http/1.1";
-    return true;
-  }
-  if (!strcmp(name, "curl")) { o->minver = 0x0303; o->alpn = "http/1.1"; return true; }
-  return false;
-}
-
-static int alpn_wire(const char *alpn, unsigned char *w, int wn) {
-  int n = 0; const char *p = alpn;
-  while (*p) {
-    const char *e = strchr(p, ','); int l = e ? (int)(e - p) : (int)strlen(p);
-    while (l > 0 && p[0] == ' ') { p++; l--; }
-    while (l > 0 && p[l - 1] == ' ') l--;
-    if (l <= 0) { if (!e) break; p = e + 1; continue; }
-    if (n + 1 + l > wn) return -1;
-    w[n++] = (unsigned char)l; memcpy(w + n, p, (size_t)l); n += l;
-    if (!e) break; p = e + 1;
-  }
-  return n;
-}
-static bool t13_wrap_client(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es);
-static bool tls_wrap_client_ex(int fd, const char *host, bool verify, const TlsOpts *o, char *err, int es) {
-  if (!tls_load()) return t13_wrap_client(fd, host, verify, o, err, es);
-  void *ctx = NULL; bool own = false;
-  if (o && (o->ciphers || o->ciphersuites || o->groups || o->alpn || o->minver || o->maxver)) {
-
-    ctx = tl.SSL_CTX_new(tl.TLS_client_method()); own = true;
-    if (!ctx) { snprintf(err, es, "تعذّر إنشاء جلسة TLS مخصصة"); return false; }
-    tl.SSL_CTX_set_verify(ctx, verify ? 1 : 0, NULL);
-    if (verify) tls_set_verify_paths(ctx);
-    if (o->minver) tl.SSL_ctrl(ctx, 123, o->minver, NULL);
-    if (o->maxver) tl.SSL_ctrl(ctx, 124, o->maxver, NULL);
-    if (o->ciphers && tl.SSL_CTX_set_cipher_list && !tl.SSL_CTX_set_cipher_list(ctx, o->ciphers)) {
-      tl.SSL_CTX_free(ctx); snprintf(err, es, "قائمة تشفيرات غير صالحة: %s", o->ciphers); return false;
-    }
-    if (o->ciphersuites && tl.SSL_CTX_set_ciphersuites && !tl.SSL_CTX_set_ciphersuites(ctx, o->ciphersuites)) {
-      tl.SSL_CTX_free(ctx); snprintf(err, es, "تشفيرات TLS1.3 غير صالحة: %s", o->ciphersuites); return false;
-    }
-    if (o->groups && tl.SSL_CTX_set1_groups_list && !tl.SSL_CTX_set1_groups_list(ctx, o->groups)) {
-      tl.SSL_CTX_free(ctx); snprintf(err, es, "قائمة المجموعات غير صالحة: %s", o->groups); return false;
-    }
-  } else ctx = get_ctx(verify);
-  void *ssl = ctx ? tl.SSL_new(ctx) : NULL;
-  if (own && tl.SSL_CTX_free) tl.SSL_CTX_free(ctx);
-  if (!ssl) { snprintf(err, es, "تعذّر إنشاء جلسة TLS"); return false; }
-  tl.SSL_set_fd(ssl, FDSYS(fd)); tl.SSL_ctrl(ssl, 55, 0, (void *)host);
-  if (o && o->alpn && tl.SSL_set_alpn_protos) {
-    unsigned char w[128]; int n = alpn_wire(o->alpn, w, (int)sizeof w);
-    if (n > 0) tl.SSL_set_alpn_protos(ssl, w, (unsigned)n);
-  }
-  if (verify) { if (!tl.SSL_set1_host) { tl.SSL_free(ssl); snprintf(err, es, "نسخة libssl لا تدعم التحقق من اسم المضيف"); return false; } tl.SSL_set1_host(ssl, host); }
-  if (tl.SSL_connect(ssl) != 1) { tl.SSL_free(ssl); snprintf(err, es, "فشلت مصافحة TLS مع %s (الشهادة غير موثوقة؟ جرّب {\"تحقق\": غلط})", host); return false; }
-  ssl_of[fd] = ssl; rbuf[fd].n = 0; if (rbuf[fd].p) rbuf[fd].p[0] = 0;
-  return true;
-}
+static bool t13_wrap_client(int fd, const char *host, bool verify, char *err, int es);
 static bool tls_wrap_client(int fd, const char *host, bool verify, char *err, int es) {
-  return tls_wrap_client_ex(fd, host, verify, NULL, err, es);
+  return t13_wrap_client(fd, host, verify, err, es);
 }
-static int listen_on(int port, const char *addr, const char *cert, const char *key, char *err, int es) {
+
+static int listen_on(int port, const char *addr, char *err, int es) {
   if (!perm_has(PM_NET)) { snprintf(err, es, "الصلاحية غير ممنوحة: شبكة (فتح منفذ)"); return -1; }
   int fd = -1; int one = 1, zero = 0, berr = 0;
   if (!addr || strchr(addr, ':')) {
@@ -409,12 +231,6 @@ static int listen_on(int port, const char *addr, const char *cert, const char *k
   if (fd < 0) { snprintf(err, es, "تعذّر الاستماع على المنفذ %d (%s)", port, strerror(berr ? berr : errno)); return -1; }
   if (fd >= MAXFD) { close(fd); snprintf(err, es, "عدد الاتصالات كبير جدا"); return -1; }
   fd_setup(fd);
-  if (cert && key) {
-    if (!tls_load()) { snprintf(err, es, "التشفير غير متاح: لم أجد libssl — %s", TLS_HINT); close(fd); return -1; }
-    void *ctx = tl.SSL_CTX_new(tl.TLS_server_method());
-    if (!ctx || tl.SSL_CTX_use_certificate_chain_file(ctx, cert) != 1 || tl.SSL_CTX_use_PrivateKey_file(ctx, key, 1) != 1) { snprintf(err, es, "تعذّر تحميل الشهادة/المفتاح"); close(fd); return -1; }
-    srv_ctx[fd] = ctx;
-  }
   return fd;
 }
 
@@ -428,11 +244,6 @@ static int accept_one(int lfd, char *ip, int ipsz) {
     struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&ss;
     if (IN6_IS_ADDR_V4MAPPED(&s6->sin6_addr)) inet_ntop(AF_INET, &s6->sin6_addr.s6_addr[12], ip, ipsz); else inet_ntop(AF_INET6, &s6->sin6_addr, ip, ipsz);
   } else inet_ntop(AF_INET, &((struct sockaddr_in *)&ss)->sin_addr, ip, ipsz);
-  if (srv_ctx[lfd]) {
-    void *ssl = tl.SSL_new(srv_ctx[lfd]); tl.SSL_set_fd(ssl, FDSYS(c));
-    if (tl.SSL_accept(ssl) != 1) { tl.SSL_free(ssl); close(c); fd_setup(c); return -2; }
-    ssl_of[c] = ssl;
-  }
   return c;
 }
 static bool getfd(Value v, int *fd) { if (!IS_NUM(v) || v.as.n < 0 || v.as.n >= MAXFD || v.as.n != floor(v.as.n)) return false; *fd = (int)v.as.n; return true; }
@@ -448,8 +259,10 @@ NAT(sk_connect) {
   *res = NUMV(fd); return true;
 }
 NAT(sk_listen) {
-  NUMA(0); Value ad = optv(argc, a, 1, "عنوان"), ce = optv(argc, a, 1, "شهادة"), ke = optv(argc, a, 1, "مفتاح"); char err[300];
-  int fd = listen_on((int)a[0].as.n, IS_T(ad, O_STR) ? AS_STR(ad)->chars : NULL, IS_T(ce, O_STR) ? AS_STR(ce)->chars : NULL, IS_T(ke, O_STR) ? AS_STR(ke)->chars : NULL, err, sizeof err);
+  NUMA(0); Value ad = optv(argc, a, 1, "عنوان"); char err[300];
+  { Value ce = optv(argc, a, 1, "شهادة"), ke = optv(argc, a, 1, "مفتاح");
+    if ((!IS_NIL(ce) && !falsey(ce)) || (!IS_NIL(ke) && !falsey(ke))) FAIL("خادم TLS غير مدمج: عميل TLS الخالص يدعم الاتصال الصادر فقط (لا خيارات شهادة/مفتاح)"); }
+  int fd = listen_on((int)a[0].as.n, IS_T(ad, O_STR) ? AS_STR(ad)->chars : NULL, err, sizeof err);
   if (fd < 0) FAIL("%s", err);
   *res = NUMV(fd); return true;
 }
