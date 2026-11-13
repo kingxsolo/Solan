@@ -20,7 +20,7 @@ $ErrorActionPreference = "Continue"   # ملاحظة: أخطاء المترجم�
 Set-Location (Join-Path $PSScriptRoot "..")
 $rootTools = Join-Path (Split-Path $PSScriptRoot) "tools"
 
-$VER = "1.3.1"
+$VER = "1.3.2"
 $fv = ($VER -split '\.')
 while ($fv.Count -lt 4) { $fv += "0" }
 $OUT = "dist"

@@ -72,7 +72,7 @@ jobs:
       - name: استخراج رقم الإصدار
         shell: pwsh
         run: |
-          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.1' }
+          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.2' }
           "VER=$ver" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "VER=$ver"
 
@@ -170,7 +170,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.1" ;;
+            *)  VER="1.3.2" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -218,7 +218,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.1" ;;
+            *)  VER="1.3.2" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -355,7 +355,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.1" ;;
+            *)  VER="1.3.2" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 

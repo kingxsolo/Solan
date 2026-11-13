@@ -11,7 +11,7 @@
 اطبع("مرحبا يا ${اسم}")
 ```
 
-**الإصدار الحالي: 1.3.1**
+**الإصدار الحالي: 1.3.2**
 
 هذا الملف هو **التوثيق الوحيد والكامل** للغة: طرق التثبيت لكل نظام، التشغيل، تعلّم اللغة، المرجع الكامل لكل دالة ومكتبة، كتابة المكتبات ونشرها وتنزيلها، الأدوات، البناء من المصدر، وسجل الإضافات والتغييرات. لا حاجة لأي ملف توثيق آخر.
 
@@ -70,7 +70,7 @@ git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
 
 #### أ) المُثبِّت `Setup.exe` (الأسهل)
 
-1. أنزّل `Solan-1.3.1-Setup-x64.exe` من صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest).
+1. أنزّل `Solan-1.3.2-Setup-x64.exe` من صفحة [Releases](https://github.com/kingxsolo/Solan/releases/latest).
 2. شغّله — الواجهة عربية بالكامل، وتختار ما تريد:
    - إضافة سولان إلى `PATH` (مفعّل افتراضياً).
    - ربط ملفات `.سو` بسولان (فتحها من المستكشف يشغّلها).
@@ -83,7 +83,7 @@ git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
 
 #### ب) نسخة محمولة (بلا تثبيت)
 
-1. أنزّل `Solan-1.3.1-windows-x64.zip` (أو `-x86.zip` لويندوز 32-بت، أو `-arm64.zip` لأجهزة ARM).
+1. أنزّل `Solan-1.3.2-windows-x64.zip` (أو `-x86.zip` لويندوز 32-بت، أو `-arm64.zip` لأجهزة ARM).
 2. فك الضغط في أي مجلد — مثلاً `C:\solan`.
 3. شغّل `solan.exe` من الطرفية، أو أضف المجلد إلى `PATH` يدوياً:
 
@@ -133,29 +133,29 @@ curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-releas
 
 ```sh
 # دبيان / أوبونتو / منت — 64-بت
-sudo apt install ./solan_1.3.1_amd64.deb
+sudo apt install ./solan_1.3.2_amd64.deb
 
 # دبيان / أوبونتو / منت — ARM64 (راسبيري باي 5، خوادم ARM)
-sudo apt install ./solan_1.3.1_arm64.deb
+sudo apt install ./solan_1.3.2_arm64.deb
 
 # فيدورا / ريد هات / سنتوس — x64
-sudo dnf install ./Solan-1.3.1-1.x86_64.rpm
+sudo dnf install ./Solan-1.3.2-1.x86_64.rpm
 
 # فيدورا / ريد هات — ARM64
-sudo dnf install ./Solan-1.3.1-1.aarch64.rpm
+sudo dnf install ./Solan-1.3.2-1.aarch64.rpm
 
 # أوبن سوزي
-sudo zypper install ./Solan-1.3.1-1.x86_64.rpm
+sudo zypper install ./Solan-1.3.2-1.x86_64.rpm
 ```
 
 #### ج) الحزمة الثابتة يدوياً
 
 ```sh
-tar xzf Solan-1.3.1-linux-x64.tar.gz
-sudo install -m755 Solan-1.3.1-linux-x64/solan /usr/local/bin/
+tar xzf Solan-1.3.2-linux-x64.tar.gz
+sudo install -m755 Solan-1.3.2-linux-x64/solan /usr/local/bin/
 
 # أو بلا صلاحيات مدير:
-mkdir -p ~/.local/bin && install -m755 Solan-1.3.1-linux-x64/solan ~/.local/bin/
+mkdir -p ~/.local/bin && install -m755 Solan-1.3.2-linux-x64/solan ~/.local/bin/
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile && . ~/.profile
 ```
 
@@ -171,7 +171,7 @@ sh install.sh
 #### ملاحظات لينكس
 
 - **`https` و`wss`**: `شبكة.جلب` على HTTPS تعمل **بلا أي إضافات** عبر عميل TLS خالص مضمّن، وكذلك `wss` و`جلب_متدفق` والبروكسي — كل شيء مدمج. خادم TLS (خيارات `شهادة`/`مفتاح`) غير مدعوم.
-- **ARM64**: حزم جاهزة كاملة — `Solan-1.3.1-linux-arm64.tar.gz` الثابتة بلا أي مكتبات، وحزم أصلية `solan_1.3.1_arm64.deb` و`Solan-1.3.1-1.aarch64.rpm` للتثبيت بالنظام، والـJIT مفعّل عليها كلها.
+- **ARM64**: حزم جاهزة كاملة — `Solan-1.3.2-linux-arm64.tar.gz` الثابتة بلا أي مكتبات، وحزم أصلية `solan_1.3.2_arm64.deb` و`Solan-1.3.2-1.aarch64.rpm` للتثبيت بالنظام، والـJIT مفعّل عليها كلها.
 
 ### ماك (macOS)
 
@@ -179,21 +179,21 @@ sh install.sh
 
 #### أ) المُثبِّت `pkg`
 
-1. أنزّل `Solan-1.3.1-macos.pkg` من [Releases](https://github.com/kingxsolo/Solan/releases/latest).
+1. أنزّل `Solan-1.3.2-macos.pkg` من [Releases](https://github.com/kingxsolo/Solan/releases/latest).
 2. شغّله وأكمل الخطوات — يثبّت `solan` في `/usr/local/bin` (سيطلب كلمة سر المدير).
 3. **إن منع Gatekeeper الفتح** (الملف غير موقّع بشهادة Apple المدفوعة)، أيٌّ من هذه يكفي:
    - **زر يمين على الملف ← فتح ← فتح** (مرة واحدة تكفي).
    - أو: إعدادات النظام ← الخصوصية والأمان ← «تم منع استخدام…» ← **فتح على أي حال**.
-   - أو من الطرفية قبل الفتح: `xattr -d com.apple.quarantine Solan-1.3.1-macos.pkg`
+   - أو من الطرفية قبل الفتح: `xattr -d com.apple.quarantine Solan-1.3.2-macos.pkg`
 
 #### ب) الحزمة المحمولة
 
 ```sh
-tar xzf Solan-1.3.1-macos-universal.tar.gz
-sudo install -m755 Solan-1.3.1-macos/solan /usr/local/bin/
+tar xzf Solan-1.3.2-macos-universal.tar.gz
+sudo install -m755 Solan-1.3.2-macos/solan /usr/local/bin/
 
 # أو بلا صلاحيات مدير:
-mkdir -p ~/.local/bin && install -m755 Solan-1.3.1-macos/solan ~/.local/bin/
+mkdir -p ~/.local/bin && install -m755 Solan-1.3.2-macos/solan ~/.local/bin/
 ```
 
 إن اشتكى الماك من الملف المنزّل: `xattr -d com.apple.quarantine solan` (أو على المجلد كاملاً).
@@ -309,7 +309,7 @@ sh install.sh --uninstall                                               # إزا
 ### التحقق بعد التثبيت
 
 ```sh
-solan --version        # solan 1.3.1
+solan --version        # solan 1.3.2
 solan -e 'اطبع("هلا يا عالم")'
 ```
 
@@ -778,7 +778,7 @@ solan                      # الوضع التفاعلي (REPL)
 | `وسائط` | قائمة نصوص: وسائط سطر الأوامر بعد اسم الملف |
 | `هو_الرئيسي` | `صح` إن كان الملف مشغَّلاً مباشرة، `غلط` إن كان مستورداً |
 | `اسم_الملف` | اسم الملف المشغَّل |
-| `النسخة` | نص إصدار اللغة (`1.3.1`) |
+| `النسخة` | نص إصدار اللغة (`1.3.2`) |
 | `نظام` · `جيسون` · `شبكة` · `سوكت` · `حلقة` | هذه المكتبات الخمس مستوردة تلقائياً (لا تحتاج `استورد`) |
 | `وعد` | صنف الوعود (انظر 4.4) |
 
@@ -2303,7 +2303,7 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 - ينتج `dist\solan.exe` ملفاً واحداً ثابتاً: `-O3` + LTO، استهداف `x86-64-v2` (SSE4.2 + POPCNT)، manifest بعلم `activeCodePage=UTF-8` و`longPathAware`، وأيقونة ومعلومات إصدار.
 - يفعّل الـJIT على ويندوز عبر طبقة `VirtualAlloc/VirtualProtect`، ويفعّل كومة الذاكرة منخفضة التجزؤ (LFH) عند الإقلاع.
 - الخيارات: `-Arch32` (بناء 32-بت i686+SSE2 يعمل على ويندوز 32 و64 بت)، `-V3` (استهداف AVX2 للأجهزة الحديثة)، `-NoStrip` (الاحتفاظ بالرموز للتنقيح)، `-GccBin مسار` (مترجم محدد).
-- المُثبِّت `Solan-1.3.1-Setup-x64.exe` يُبنى بـ Inno Setup بواجهة عربية كاملة (`pc\installer.iss` + `pc\ArabicPC.isl`): PATH + ربط ملفات `.سو` + إزالة تثبيت.
+- المُثبِّت `Solan-1.3.2-Setup-x64.exe` يُبنى بـ Inno Setup بواجهة عربية كاملة (`pc\installer.iss` + `pc\ArabicPC.isl`): PATH + ربط ملفات `.سو` + إزالة تثبيت.
 - تعديلات المصدر الخاصة بويندوز كلها في `src/platform/platform.inc` و`src/runtime/main.inc`.
 
 ### بنية المصدر
@@ -2375,6 +2375,24 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 ---
 
 ## 15) ما الجديد: سجل الإضافات والتغييرات
+
+### الإصدار 1.3.2
+
+#### مثبّتات وحزم جاهزة لكل الأنظمة والمعماريات
+
+| البند | التفصيل |
+|---|---|
+| **ويندوز ARM64** | بناء متقاطع جديد بـllvm-mingw: `Solan-Setup-arm64.exe` (مُثبِّت عربي كامل) و`Solan-windows-arm64.zip` — لأجهزة سطح ويندوز على ARM ولابتوبات ARM، والـJIT مفعّل |
+| **ويندوز 32-بت مثبّت** | `Solan-Setup-x86.exe` — المُثبِّت العربي أصبح متاحاً للمعمارية 32-بت أيضاً (سابقاً كان zip محمول فقط) |
+| **لينكس ARM64 حزم أصلية** | `solan_arm64.deb` و`Solan-1.3.2-1.aarch64.rpm` — حزم تثبيت نظام لأوبونتو/ديبيان وفيدورا/ريد هات على ARM64 (راسبيري باي 5، خوادم ARM)، تُبنى على عدّاء ARM أصلي |
+| **خيارات المُثبِّت محددة تلقائياً** | في كل تشغيل للمُثبِّت: أيقونة سطح المكتب + إضافة إلى PATH + ربط ملفات `.سو` كلها محددة افتراضياً؛ فقط «المسارات الطويلة» تبقى غير محددة (تحتاج صلاحيات مدير) |
+| **دعم معمارية المُثبِّت** | ملف `installer.iss` واحد يبني المُثبِّت للمعماريات الثلاث (x64/x86/ARM64) عبر `/DArch` مع فحص المعمارية عند التثبيت |
+
+ملاحظات:
+
+- إجمالي ملفات الإصدار الجاهز أصبح **17 ملفاً** تغطي: ويندوز (3 مثبّتات + 3 محمول)، لينكس (2 ثابت + 2 deb + 2 rpm)، ماك (مثبّت pkg + محمول يونيفرسال) — كلها بلا أي مكتبات خارجية.
+- روابط التنزيل الثابتة في README وجدول المنصات تُحدّثت لتشمل الملفات الجديدة، وصفحة التثبيت في الموقع تعرضها كلها.
+- ترمكس (أندرويد) كما هو: بناء من المصدر بـ`sh install.sh` بعد `pkg install clang`.
 
 ### الإصدار 1.3.1
 
