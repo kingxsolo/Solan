@@ -49,7 +49,7 @@ Name: "arabic"; MessagesFile: "ArabicPC.isl"
 [CustomMessages]
 arabic.CreateDesktopIcon=إنشاء أيقونة على سطح المكتب
 arabic.AddToPath=إضافة سولان إلى متغير PATH (لتشغيله من أي طرفية)
-arabic.AssocFiles=ربط ملفات سولان (.سو .an .solan) بالبرنامج
+arabic.AssocFiles=ربط ملفات سولان (.سو .an .solan) بالبرنامج (محدد تلقائياً)
 arabic.RunAfter=تشغيل سولان الآن (اختبار التثبيت)
 arabic.OpenReadme=فتح دليل اللغة (README)
 arabic.LongPaths=تفعيل دعم المسارات الطويلة في ويندوز (يتطلب صلاحيات مدير)
@@ -66,9 +66,9 @@ Name: "{group}\إزالة تثبيت سولان"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\سولان"; Filename: "{app}\solan.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "أيقونات:"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "أيقونات:"; Flags: checkedonce
 Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"; Flags: checkedonce
-Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: unchecked
+Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: checkedonce
 Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked
 
 [Registry]
