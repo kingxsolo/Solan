@@ -1,5 +1,5 @@
 ﻿<div align="center">
-  <img src="assets/solan-banner.jpg" alt="سولان — لغة برمجة عربية بالكامل" width="380"/>
+  <img src="assets/solan-logo.png" alt="سولان — لغة برمجة عربية بالكامل" width="380"/>
 </div>
 
 # سولان (Solan) — لغة برمجة عربية
