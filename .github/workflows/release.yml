@@ -10,7 +10,7 @@ name: بناء-وإصدار
 
 on:
   push:
-    branches: [main, pc-edition]
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
