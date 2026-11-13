@@ -7,6 +7,9 @@
 #ifndef SolanVersion
 #define SolanVersion "1.3.1"
 #endif
+#ifndef Arch
+#define Arch "x64"
+#endif
 #define SolanPublisher "Solan Project"
 #define SolanURL "https://github.com/kingxsolo/Solan"
 
@@ -28,12 +31,19 @@ UninstallDisplayName=سولان (Solan) {#SolanVersion}
 UninstallDisplayIcon={app}\solan.exe
 SetupIconFile=solan.ico
 OutputDir=..\dist
-OutputBaseFilename=Solan-{#SolanVersion}-Setup-x64
+OutputBaseFilename=Solan-{#SolanVersion}-Setup-{#Arch}
 Compression=lzma2/max
 LZMAUseSeparateProcess=yes
 SolidCompression=yes
+#if Arch == "x86"
+ArchitecturesAllowed=x86
+#elif Arch == "arm64"
+ArchitecturesInstallIn64BitMode=arm64
+ArchitecturesAllowed=arm64
+#else
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
+#endif
 WizardStyle=modern
 ChangesEnvironment=yes
 DisableProgramGroupPage=yes
@@ -66,9 +76,10 @@ Name: "{group}\إزالة تثبيت سولان"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\سولان"; Filename: "{app}\solan.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "أيقونات:"; Flags: checkedonce
-Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"; Flags: checkedonce
-Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"; Flags: checkedonce
+; كل الخيارات محددة افتراضياً في كل تشغيل — عدا المسارات الطويلة (تحتاج صلاحيات مدير)
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "أيقونات:"
+Name: "addpath"; Description: "{cm:AddToPath}"; GroupDescription: "التثبيت:"
+Name: "assoc"; Description: "{cm:AssocFiles}"; GroupDescription: "التثبيت:"
 Name: "longpaths"; Description: "{cm:LongPaths}"; GroupDescription: "التثبيت:"; Flags: unchecked
 
 [Registry]

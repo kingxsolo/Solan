@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   # ------------------------------------------------------------------
-  #  ويندوز: بناء أصلي 64-بت و32-بت + اختبارات + مُثبِّت عربي (x64)
+  #  ويندوز: بناء أصلي x64 + x86 + ARM64 + اختبارات + مُثبِّت عربي لكل معمارية
   # ------------------------------------------------------------------
   windows:
     name: ويندوز ${{ matrix.arch }}
@@ -39,10 +39,14 @@ jobs:
           - arch: x86
             msystem: mingw32
             pkg: mingw-w64-i686-gcc
+          - arch: arm64
+            msystem: ''            # ARM64 يُبنى متقاطعاً على العدّاء x64 بـllvm-mingw
+            pkg: ''
     steps:
       - uses: actions/checkout@v4
 
       - name: تجهيز مترجم مينغو-و64
+        if: matrix.arch != 'arm64'
         uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
@@ -50,16 +54,29 @@ jobs:
           release: false
           install: ${{ matrix.pkg }}
 
-      - name: استخراج رقم الإصدار
-        shell: msys2 {0}
+      # ARM64: مترجم متقاطع llvm-mingw على العدّاء x64 (لا حاجة لجهاز ARM)
+      - name: مترجم متقاطع لويندوز ARM64
+        if: matrix.arch == 'arm64'
+        shell: pwsh
         run: |
-          case "$GITHUB_REF_NAME" in
-            v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.1" ;;
-          esac
-          echo "VER=$VER" >> "$GITHUB_ENV"
+          $url = (Invoke-RestMethod -Uri 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest' -TimeoutSec 60).assets |
+                 Where-Object { $_.name -match 'ucrt-ubuntu-22\.04-x86_64\.tar\.xz$' } | Select-Object -First 1 -ExpandProperty browser_download_url
+          Write-Host "llvm-mingw: $url"
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.tar.xz
+          New-Item -ItemType Directory -Force -Path C:\llvm-mingw | Out-Null
+          tar -xf llvm-mingw.tar.xz -C C:\llvm-mingw --strip-components=1
+          if (-not (Test-Path C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.exe)) { throw 'فشل تجهيز المترجم المتقاطع' }
+          Add-Content $env:GITHUB_PATH 'C:\llvm-mingw\bin'
 
-      - name: بناء
+      - name: استخراج رقم الإصدار
+        shell: pwsh
+        run: |
+          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.1' }
+          "VER=$ver" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "VER=$ver"
+
+      - name: بناء (أصلي x64/x86)
+        if: matrix.arch != 'arm64'
         shell: msys2 {0}
         run: |
           gcc -O2 -Wno-format-truncation \
@@ -67,11 +84,36 @@ jobs:
               -o solan.exe solan.c \
               -lws2_32 -lshell32 -ladvapi32 -lm
 
+      # ARM64: مترجم llvm-mingw المتقاطع مباشرة على العدّاء (بلا MSYS2)
+      # الاختبارات هنا عبر وين 11 على ARM إن توفر، وإلا تُدار في مهمة لينكس عبر QEMU
+      - name: بناء متقاطع ARM64
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          & C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.exe -O2 -Wno-format-truncation `
+              -D_WIN32_WINNT=0x0A00 `
+              -o solan.exe solan.c `
+              -lws2_32 -lshell32 -ladvapi32 -lm
+          if ($LASTEXITCODE -ne 0) { throw 'فشل البناء المتقاطع ARM64' }
+          Get-Item solan.exe | Select-Object Name, Length
+
+      # الثنائي ARM64 يُبنى من نفس المصدر المُختبر في مهمة لينكس ARM64 عبر QEMU
+      - name: التحقق من الثنائي ARM64
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path solan.exe)) { throw 'solan.exe غير موجود' }
+          $size = (Get-Item solan.exe).Length
+          if ($size -lt 100KB) { throw "حجم الثنائي مشبوه: $size بايت" }
+          Write-Host "solan.exe ARM64 جاهز ($([Math]::Round($size/1KB)) KB)"
+
       - name: الاختبارات (22)
+        if: matrix.arch != 'arm64'
         shell: msys2 {0}
         run: ./solan.exe pc/اختبار_ويندوز.سو
 
       - name: اختبار JIT (حلقات ساخنة + تحقق نتائج)
+        if: matrix.arch != 'arm64'
         shell: msys2 {0}
         run: ./solan.exe pc/اختبار_JIT.سو
 
@@ -88,8 +130,8 @@ jobs:
           Copy-Item README.md, LICENSE حزمة/
           Compress-Archive -Path حزمة/* -DestinationPath "Solan-$env:VER-windows-${{ matrix.arch }}.zip" -Force
 
-      - name: المُثبِّت العربي Setup.exe (x64 فقط)
-        if: matrix.arch == 'x64'
+      # مُثبِّت عربي لكل معمارية — نفس installer.iss مع /DArch
+      - name: المُثبِّت العربي Setup.exe (${{ matrix.arch }})
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -97,7 +139,7 @@ jobs:
             choco install innosetup -y --no-progress
             $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           }
-          & $iscc "/DExeName=$PWD/solan.exe" "/DSolanVersion=$env:VER" pc/installer.iss
+          & $iscc "/DExeName=$PWD/solan.exe" "/DSolanVersion=$env:VER" "/DArch=${{ matrix.arch }}" pc/installer.iss
           if ($LASTEXITCODE -ne 0) { throw "فشل بناء المُثبِّت" }
 
       - name: رفع المخرجات
@@ -106,7 +148,7 @@ jobs:
           name: windows-${{ matrix.arch }}
           path: |
             Solan-*-windows-*.zip
-            dist/Solan-*-Setup-x64.exe
+            dist/Solan-*-Setup-*.exe
           if-no-files-found: warn
 
   # ------------------------------------------------------------------
@@ -207,47 +249,62 @@ jobs:
 
   # ------------------------------------------------------------------
   #  حزم لينكس الأصلية: deb (ديبيان/أوبونتو) و rpm (فيدورا/ريد هات)
+  #  لكل من x64 وARM64 — حزم جاهزة للتثبيت على النظامين
   # ------------------------------------------------------------------
   linux-pkg:
-    name: حزم لينكس deb و rpm
-    needs: linux
+    name: حزم لينكس deb و rpm (${{ matrix.arch }})
+    needs: [linux, linux-arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            artifact: linux-x64
+            tarname: linux-x64
+            rpmarch: x86_64
+            debarch: amd64
+          - arch: arm64
+            artifact: linux-arm64
+            tarname: linux-arm64
+            rpmarch: aarch64
+            debarch: arm64
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: linux-x64
+          name: ${{ matrix.artifact }}
           path: مدخل
 
       - name: فك الحزمة
         run: |
-          VER=$(ls مدخل/Solan-*-linux-x64.tar.gz | head -n1 | sed 's/.*Solan-\(.*\)-linux-x64.tar.gz/\1/')
+          VER=$(ls مدخل/Solan-*-linux-${{ matrix.tarname }}.tar.gz | head -n1 | sed "s/.*Solan-\(.*\)-linux-${{ matrix.tarname }}.tar.gz/\1/")
           echo "VER=$VER" >> "$GITHUB_ENV"
-          tar xzf "مدخل/Solan-$VER-linux-x64.tar.gz" -C مدخل
+          tar xzf "مدخل/Solan-$VER-linux-${{ matrix.tarname }}.tar.gz" -C مدخل
 
       - name: بناء deb
         run: |
           mkdir -p deb/DEBIAN deb/usr/bin deb/usr/share/doc/solan
-          install -m755 "مدخل/Solan-$VER-linux-x64/solan" deb/usr/bin/solan
-          install -m644 "مدخل/Solan-$VER-linux-x64/LICENSE" deb/usr/share/doc/solan/copyright
+          install -m755 "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/solan" deb/usr/bin/solan
+          install -m644 "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/LICENSE" deb/usr/share/doc/solan/copyright
           cat > deb/DEBIAN/control <<EOF
           Package: solan
           Version: $VER
           Section: devel
           Priority: optional
-          Architecture: amd64
+          Architecture: ${{ matrix.debarch }}
           Maintainer: Solan Project <pc@solan.local>
           Description: سولان — لغة برمجة عربية
            ملف تنفيذي ثابت لا يحتاج أي مكتبات خارجية. يدعم JIT على x86-64.
           EOF
-          dpkg-deb --build --root-owner-group deb "solan_${VER}_amd64.deb"
+          dpkg-deb --build --root-owner-group deb "solan_${VER}_${{ matrix.debarch }}.deb"
 
       - name: بناء rpm
         run: |
           sudo apt-get install -y rpm
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           mkdir -p "solan-$VER"
-          cp "مدخل/Solan-$VER-linux-x64/solan" "solan-$VER/solan"
+          cp "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/solan" "solan-$VER/solan"
           tar czf "rpmbuild/SOURCES/solan-$VER.tar.gz" "solan-$VER"
           cat > rpmbuild/SPECS/solan.spec <<EOF
           Name:           solan
@@ -257,7 +314,7 @@ jobs:
           License:        MIT
           URL:            https://github.com/kingxsolo/Solan
           Source0:        solan-%{version}.tar.gz
-          BuildArch:      x86_64
+          BuildArch:      ${{ matrix.rpmarch }}
           AutoReqProv:    no
           %description
           ملف تنفيذي ثابت لا يحتاج أي مكتبات خارجية. يدعم JIT على x86-64.
@@ -269,15 +326,15 @@ jobs:
           /usr/bin/solan
           EOF
           rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/solan.spec
-          cp rpmbuild/RPMS/x86_64/solan-$VER-1*.x86_64.rpm .
+          cp rpmbuild/RPMS/${{ matrix.rpmarch }}/solan-$VER-1*.${{ matrix.rpmarch }}.rpm .
 
       - name: رفع المخرجات
         uses: actions/upload-artifact@v4
         with:
-          name: linux-pkg
+          name: linux-pkg-${{ matrix.arch }}
           path: |
-            solan_*_amd64.deb
-            solan-*.x86_64.rpm
+            solan_*.deb
+            solan-*.rpm
 
   # ------------------------------------------------------------------
   #  ماك: ملف يونيفرسال (Intel + Apple Silicon) + مُثبِّت pkg
@@ -377,12 +434,17 @@ jobs:
           # تسطيح: أرتيفكت ويندوز يحفظ المُثبِّت تحت dist/ — ننقله للجذر
           if [ -d dist ]; then mv dist/* . && rmdir dist; fi
           cp Solan-*-Setup-x64.exe          Solan-Setup-x64.exe
+          cp Solan-*-Setup-x86.exe          Solan-Setup-x86.exe
+          cp Solan-*-Setup-arm64.exe        Solan-Setup-arm64.exe
           cp Solan-*-windows-x64.zip        Solan-windows-x64.zip
           cp Solan-*-windows-x86.zip        Solan-windows-x86.zip
+          cp Solan-*-windows-arm64.zip      Solan-windows-arm64.zip
           cp Solan-*-linux-x64.tar.gz       Solan-linux-x64.tar.gz
           cp Solan-*-linux-arm64.tar.gz     Solan-linux-arm64.tar.gz
           cp solan_*_amd64.deb              solan_amd64.deb
+          cp solan_*_arm64.deb              solan_arm64.deb
           cp solan-*x86_64.rpm              solan.x86_64.rpm
+          cp solan-*aarch64.rpm             solan.aarch64.rpm
           cp Solan-*-macos.pkg              Solan-macos.pkg
           cp Solan-*-macos-universal.tar.gz Solan-macos-universal.tar.gz
           ls -1
@@ -394,12 +456,16 @@ jobs:
 
           | منصتك | الملف | الطريقة |
           |---|---|---|
-          | ويندوز 64-بت | `Solan-*-Setup-x64.exe` | شغّله واتبع الخطوات (واجهة عربية: PATH + ربط الملفات + إزالة تثبيت) |
-          | ويندوز (بدون تثبيت) | `Solan-*-windows-x64.zip` / `x86.zip` | فك الضغط وشغّل `solan.exe` |
+          | ويندوز 64-بت | `Solan-*-Setup-x64.exe` | شغّله واتبع الخطوات (واجهة عربية: PATH + ربط الملفات محددة تلقائياً + إزالة تثبيت) |
+          | ويندوز 32-بت | `Solan-*-Setup-x86.exe` | نفس المُثبِّت للمعمارية 32-بت |
+          | ويندوز ARM64 | `Solan-*-Setup-arm64.exe` | نفس المُثبِّت لأجهزة ARM (سيرفيس، لابتوبات ARM) |
+          | ويندوز (بدون تثبيت) | `Solan-*-windows-x64.zip` / `x86.zip` / `arm64.zip` | فك الضغط وشغّل `solan.exe` |
           | لينكس (أي توزيعة) | `Solan-*-linux-x64.tar.gz` | `tar xzf` ثم انسخ `solan` إلى `~/.local/bin` — **ثابت، بلا أي مكتبات** |
           | لينكس ARM64 (راسبيري باي 5، خوادم ARM) | `Solan-*-linux-arm64.tar.gz` | `tar xzf` ثم انسخ `solan` — **ثابت، بلا أي مكتبات** |
-          | أوبونتو/ديبيان | `solan_*_amd64.deb` | `sudo apt install ./الملف.deb` |
-          | فيدورا/ريد هات | `solan-*.x86_64.rpm` | `sudo rpm -i الملف.rpm` أو `sudo dnf install ./الملف.rpm` |
+          | أوبونتو/ديبيان 64-بت | `solan_*_amd64.deb` | `sudo apt install ./الملف.deb` |
+          | أوبونتو/ديبيان ARM64 | `solan_*_arm64.deb` | `sudo apt install ./الملف.deb` |
+          | فيدورا/ريد هات x64 | `solan-*.x86_64.rpm` | `sudo dnf install ./الملف.rpm` |
+          | فيدورا/ريد هات ARM64 | `solan-*.aarch64.rpm` | `sudo dnf install ./الملف.rpm` |
           | ماك (Intel + Apple Silicon) | `Solan-*-macos.pkg` | شغّله — يثبّت في `/usr/local/bin` (إن منع الماك: زر يمين ← فتح) |
           | ماك (بدون تثبيت) | `Solan-*-macos-universal.tar.gz` | فك الضغط وشغّل `solan` |
           | ترمكس (أندرويد) | — | `pkg install -y clang git` ثم `git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh` (بناء من المصدر داخل ترمكس، دقائق قليلة) |
