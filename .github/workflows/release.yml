@@ -54,19 +54,20 @@ jobs:
           release: false
           install: ${{ matrix.pkg }}
 
-      # ARM64: مترجم متقاطع llvm-mingw على العدّاء x64 (لا حاجة لجهاز ARM)
+      # ARM64: مترجم متقاطع llvm-mingw نسخة ويندوز الأصلية (بلا روابط رمزية)
       - name: مترجم متقاطع لويندوز ARM64
         if: matrix.arch == 'arm64'
         shell: pwsh
         run: |
-          $url = (Invoke-RestMethod -Uri 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest' -TimeoutSec 60).assets |
-                 Where-Object { $_.name -match 'ucrt-ubuntu-22\.04-x86_64\.tar\.xz$' } | Select-Object -First 1 -ExpandProperty browser_download_url
+          $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest' -TimeoutSec 60
+          $url = ($rel.assets | Where-Object { $_.name -match '^llvm-mingw-.*-ucrt-x86_64\.zip$' } | Select-Object -First 1).browser_download_url
           Write-Host "llvm-mingw: $url"
-          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.tar.xz
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
           New-Item -ItemType Directory -Force -Path C:\llvm-mingw | Out-Null
-          tar -xf llvm-mingw.tar.xz -C C:\llvm-mingw --strip-components=1
-          if (-not (Test-Path C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.exe)) { throw 'فشل تجهيز المترجم المتقاطع' }
-          Add-Content $env:GITHUB_PATH 'C:\llvm-mingw\bin'
+          tar -xf llvm-mingw.zip -C C:\llvm-mingw --strip-components=1
+          $gcc = Get-ChildItem C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.* -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $gcc) { throw 'لم يُعثر على المترجم المتقاطع بعد الفك' }
+          Write-Host "المترجم المتقاطع: $($gcc.FullName)"
 
       - name: استخراج رقم الإصدار
         shell: pwsh
@@ -84,13 +85,14 @@ jobs:
               -o solan.exe solan.c \
               -lws2_32 -lshell32 -ladvapi32 -lm
 
-      # ARM64: مترجم llvm-mingw المتقاطع مباشرة على العدّاء (بلا MSYS2)
-      # الاختبارات هنا عبر وين 11 على ARM إن توفر، وإلا تُدار في مهمة لينكس عبر QEMU
+      # ARM64: المترجم المتقاطع من llvm-mingw (clang) مباشرة على العدّاء
+      # الثنائي يُتحقق منه بحجمه؛ الاختبار الوظيفي عبر QEMU في مهمة لينكس ARM64 على نفس المصدر
       - name: بناء متقاطع ARM64
         if: matrix.arch == 'arm64'
         shell: pwsh
         run: |
-          & C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.exe -O2 -Wno-format-truncation `
+          $gcc = (Get-ChildItem C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.* | Select-Object -First 1).FullName
+          & $gcc -O2 -Wno-format-truncation `
               -D_WIN32_WINNT=0x0A00 `
               -o solan.exe solan.c `
               -lws2_32 -lshell32 -ladvapi32 -lm
@@ -262,12 +264,12 @@ jobs:
         include:
           - arch: amd64
             artifact: linux-x64
-            tarname: linux-x64
+            suffix: x64
             rpmarch: x86_64
             debarch: amd64
           - arch: arm64
             artifact: linux-arm64
-            tarname: linux-arm64
+            suffix: arm64
             rpmarch: aarch64
             debarch: arm64
     steps:
@@ -278,15 +280,15 @@ jobs:
 
       - name: فك الحزمة
         run: |
-          VER=$(ls مدخل/Solan-*-linux-${{ matrix.tarname }}.tar.gz | head -n1 | sed "s/.*Solan-\(.*\)-linux-${{ matrix.tarname }}.tar.gz/\1/")
+          VER=$(ls مدخل/Solan-*-linux-${{ matrix.suffix }}.tar.gz | head -n1 | sed "s/.*Solan-\(.*\)-linux-${{ matrix.suffix }}.tar.gz/\1/")
           echo "VER=$VER" >> "$GITHUB_ENV"
-          tar xzf "مدخل/Solan-$VER-linux-${{ matrix.tarname }}.tar.gz" -C مدخل
+          tar xzf "مدخل/Solan-$VER-linux-${{ matrix.suffix }}.tar.gz" -C مدخل
 
       - name: بناء deb
         run: |
           mkdir -p deb/DEBIAN deb/usr/bin deb/usr/share/doc/solan
-          install -m755 "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/solan" deb/usr/bin/solan
-          install -m644 "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/LICENSE" deb/usr/share/doc/solan/copyright
+          install -m755 "مدخل/Solan-$VER-linux-${{ matrix.suffix }}/solan" deb/usr/bin/solan
+          install -m644 "مدخل/Solan-$VER-linux-${{ matrix.suffix }}/LICENSE" deb/usr/share/doc/solan/copyright
           cat > deb/DEBIAN/control <<EOF
           Package: solan
           Version: $VER
@@ -304,7 +306,7 @@ jobs:
           sudo apt-get install -y rpm
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           mkdir -p "solan-$VER"
-          cp "مدخل/Solan-$VER-linux-${{ matrix.tarname }}/solan" "solan-$VER/solan"
+          cp "مدخل/Solan-$VER-linux-${{ matrix.suffix }}/solan" "solan-$VER/solan"
           tar czf "rpmbuild/SOURCES/solan-$VER.tar.gz" "solan-$VER"
           cat > rpmbuild/SPECS/solan.spec <<EOF
           Name:           solan

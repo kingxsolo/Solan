@@ -44,12 +44,13 @@
 | منصتك | أزرار التنزيل |
 |---|---|
 | 🪟 **ويندوز 64-بت** | [![Windows 64-bit installer](https://img.shields.io/badge/Windows_64--bit-Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x64.exe) [![Windows 64-bit portable zip](https://img.shields.io/badge/Windows_64--bit-Portable_ZIP-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x64.zip) |
-| 🪟 **ويندوز 32-بت** | [![Windows 32-bit portable zip](https://img.shields.io/badge/Windows_32--bit-Portable_ZIP-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x86.zip) |
+| 🪟 **ويندوز 32-بت** | [![Windows 32-bit installer](https://img.shields.io/badge/Windows_32--bit-Installer-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x86.exe) [![Windows 32-bit portable zip](https://img.shields.io/badge/Windows_32--bit-Portable_ZIP-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x86.zip) |
+| 🪟 **ويندوز ARM64** | [![Windows ARM64 installer](https://img.shields.io/badge/Windows_ARM64-Installer-0E7A8D?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-arm64.exe) [![Windows ARM64 portable zip](https://img.shields.io/badge/Windows_ARM64-Portable_ZIP-0E7A8D?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-arm64.zip) |
 | 🍎 **ماك** (Intel + Apple Silicon) | [![macOS installer pkg](https://img.shields.io/badge/macOS-Installer_PKG-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos.pkg) [![macOS portable tar.gz](https://img.shields.io/badge/macOS-Portable_tar.gz-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos-universal.tar.gz) |
 | 🐧 **لينكس 64-بت** (أي توزيعة) | [![Debian package](https://img.shields.io/badge/Linux_64--bit-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_amd64.deb) [![RPM package](https://img.shields.io/badge/Linux_64--bit-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.x86_64.rpm) [![Linux portable tar.gz](https://img.shields.io/badge/Linux_64--bit-Portable_tar.gz-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-x64.tar.gz) |
-| 🐧 **لينكس ARM64** (راسبيري باي 5، خوادم ARM) | [![Linux ARM64 portable tar.gz](https://img.shields.io/badge/Linux_ARM64-Portable_tar.gz-2EA043?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-arm64.tar.gz) |
+| 🐧 **لينكس ARM64** (راسبيري باي 5، خوادم ARM) | [![Debian ARM64 package](https://img.shields.io/badge/Linux_ARM64-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_arm64.deb) [![RPM ARM64 package](https://img.shields.io/badge/Linux_ARM64-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.aarch64.rpm) [![Linux ARM64 portable tar.gz](https://img.shields.io/badge/Linux_ARM64-Portable_tar.gz-2EA043?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-arm64.tar.gz) |
 
-المُثبِّت بواجهة عربية (PATH + ربط ملفات `.سو` + إزالة تثبيت)، وحزم لينكس **ثابتة بلا أي مكتبات**.
+المُثبِّت بواجهة عربية لكل معماريات ويندوز (PATH + ربط ملفات `.سو` محددة تلقائياً + إزالة تثبيت)، وحزم لينكس **ثابتة بلا أي مكتبات**، و**حزمة ماك pkg مثبّت جاهز**.
 
 **لينكس وماك بأمر واحد** — يكتشف نظامك ويثبّت:
 
@@ -82,7 +83,7 @@ git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
 
 #### ب) نسخة محمولة (بلا تثبيت)
 
-1. أنزّل `Solan-1.3.1-windows-x64.zip` (أو `-x86.zip` لويندوز 32-بت).
+1. أنزّل `Solan-1.3.1-windows-x64.zip` (أو `-x86.zip` لويندوز 32-بت، أو `-arm64.zip` لأجهزة ARM).
 2. فك الضغط في أي مجلد — مثلاً `C:\solan`.
 3. شغّل `solan.exe` من الطرفية، أو أضف المجلد إلى `PATH` يدوياً:
 
@@ -115,7 +116,7 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 
 - **`https` و`wss`**: `شبكة.جلب` على HTTPS تعمل **بلا أي إضافات** عبر عميل TLS خالص مضمّن (TLS 1.3 وTLS 1.2 مع تحقق كامل للشهادات)، وكذلك `wss` و`جلب_متدفق` والبروكسي — كل شيء مدمج. خادم TLS (خيارات `شهادة`/`مفتاح`) غير مدعوم. عند غياب شهادات النظام تُستعمل حزمة شهادات CA احتياطية **مدمجة** فيعمل HTTPS فوراً.
 - **مسارات الحزم الطويلة**: إن ظهرت مشاكل مع مسارات المكتبات، فعّل «Long Paths» أو اجعل `SOLAN_HOME` قصيراً (مثل `C:\so`).
-- **32-بت**: نسخة `-x86.zip` مفسَّرة كامل الوظائف (الـJIT للـ64-بت فقط).
+- **32-بت وARM64**: نسخة `-x86.zip` مفسَّرة كامل الوظائف (الـJIT للـ64-بت فقط)، ونسخة `-arm64.zip` لمُثبِّتها `Setup-arm64.exe` تعمل على أجهزة ويندوز على ARM (سيرفيس، لابتوبات ARM).
 - **الأداء**: نسخة ويندوز الأصلية مربوطة ثابتاً بـ `-O3` وLTO ومستهدفة `x86-64-v2`، والـJIT مفعّل — انظر القسم 14 للأرقام المقاسة.
 
 ### لينكس
@@ -131,11 +132,17 @@ curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-releas
 #### ب) حزمة أصلية (deb / rpm)
 
 ```sh
-# دبيان / أوبونتو / منت
+# دبيان / أوبونتو / منت — 64-بت
 sudo apt install ./solan_1.3.1_amd64.deb
 
-# فيدورا / ريد هات / سنتوس
+# دبيان / أوبونتو / منت — ARM64 (راسبيري باي 5، خوادم ARM)
+sudo apt install ./solan_1.3.1_arm64.deb
+
+# فيدورا / ريد هات / سنتوس — x64
 sudo dnf install ./Solan-1.3.1-1.x86_64.rpm
+
+# فيدورا / ريد هات — ARM64
+sudo dnf install ./Solan-1.3.1-1.aarch64.rpm
 
 # أوبن سوزي
 sudo zypper install ./Solan-1.3.1-1.x86_64.rpm
@@ -164,7 +171,7 @@ sh install.sh
 #### ملاحظات لينكس
 
 - **`https` و`wss`**: `شبكة.جلب` على HTTPS تعمل **بلا أي إضافات** عبر عميل TLS خالص مضمّن، وكذلك `wss` و`جلب_متدفق` والبروكسي — كل شيء مدمج. خادم TLS (خيارات `شهادة`/`مفتاح`) غير مدعوم.
-- **ARM64**: حزمة جاهزة `Solan-1.3.1-linux-arm64.tar.gz` — ملف ثابت بلا أي مكتبات، والـJIT مفعّل عليه.
+- **ARM64**: حزم جاهزة كاملة — `Solan-1.3.1-linux-arm64.tar.gz` الثابتة بلا أي مكتبات، وحزم أصلية `solan_1.3.1_arm64.deb` و`Solan-1.3.1-1.aarch64.rpm` للتثبيت بالنظام، والـJIT مفعّل عليها كلها.
 
 ### ماك (macOS)
 
