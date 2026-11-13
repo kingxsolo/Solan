@@ -256,7 +256,7 @@ jobs:
   linux-pkg:
     name: حزم لينكس deb و rpm (${{ matrix.arch }})
     needs: [linux, linux-arm64]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -267,11 +267,14 @@ jobs:
             suffix: x64
             rpmarch: x86_64
             debarch: amd64
+            runner: ubuntu-24.04
           - arch: arm64
             artifact: linux-arm64
             suffix: arm64
             rpmarch: aarch64
             debarch: arm64
+            # عدّاء ARM64 أصلي: rpmbuild على أوبونتو x64 يرفض بناء aarch64 نهائياً
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/download-artifact@v4
         with:
