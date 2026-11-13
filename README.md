@@ -2323,7 +2323,6 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 | `src/runtime/` | نقطة التشغيل `main.inc` والـREPL وأدوات `fmt` و`lsp` وتهيئة الدوال المدمجة (`init.inc`) |
 | `src/abi/` | واجهة C (`capi.inc`) و`include/solan.h` |
 | `src/platform/` | الفروق بين الأنظمة (POSIX وويندوز: الذاكرة التنفيذية للـJIT، كومة LFH، UTF-8) |
-| `stdlib/` | المكتبات القياسية المكتوبة بسولان |
 | `pc/` | بناء نسخة ويندوز الأصلية: سكربت البناء `build-pc.ps1` والمترجم المحمول والمُثبِّت وموارده (أيقونة، manifest، ترجمة عربية) |
 | `assets/` | الهوية البصرية: البانر (`solan-banner.jpg`) والشعار الشفاف (`solan-logo.png`) وسكربت `make-icons.ps1` الذي يولّد الأيقونات (شفافة) من البانر |
 | `dist/` | النواتج الجاهزة بعد البناء (الملفات التنفيذية والمُثبِّت) |
