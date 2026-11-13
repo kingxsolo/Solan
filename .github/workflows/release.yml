@@ -327,7 +327,7 @@ jobs:
           %files
           /usr/bin/solan
           EOF
-          rpmbuild -bb --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/solan.spec
+          rpmbuild -bb --target ${{ matrix.rpmarch }} --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/solan.spec
           cp rpmbuild/RPMS/${{ matrix.rpmarch }}/solan-$VER-1*.${{ matrix.rpmarch }}.rpm .
 
       - name: رفع المخرجات
