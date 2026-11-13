@@ -215,11 +215,6 @@ NAT(s_platform) {
   dset(&m->d, KX("نسخة"), OBJV(intern_c(SOLAN_VERSION)));
 
   dset(&m->d, KN("ضغط_مضمن"), BOOLV(1));
-#ifdef SOLAN_SQLITE_EMBED
-  dset(&m->d, KN("sqlite_مضمن"), BOOLV(1));
-#else
-  dset(&m->d, KN("sqlite_مضمن"), BOOLV(0));
-#endif
   vm.sp--; *res = OBJV(m); return true;
 }
 

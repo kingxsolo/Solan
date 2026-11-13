@@ -33,7 +33,6 @@
 #include "src/lib/ecbig.inc"
 #include "src/lib/x509.inc"
 #include "src/lib/tls13.inc"
-#include "src/lib/sqlite.inc"
 #include "src/lib/zlib.inc"
 #include "src/lib/kvstore.inc"
 #include "src/lib/ffi.inc"

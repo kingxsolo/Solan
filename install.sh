@@ -188,8 +188,6 @@ case "$KIND" in
 esac
 BUILD_CFLAGS="-O2 -Wno-format-truncation ${CPPFLAGS:-} ${CFLAGS:-}"
 
-echo "SQLite: اختياري؛ تُحمّل من مكتبة النظام وقت التشغيل عند توفرها."
-
 run rm -f "$EXE"
 run $CC $BUILD_CFLAGS -o "$EXE" solan.c $LINK_EXPORT ${LDFLAGS:-} $LINK_LIBS
 [ "$DRY" = 1 ] || [ -f "$EXE" ] || { echo "فشل البناء: $EXE غير موجود"; exit 1; }
