@@ -1,4 +1,4 @@
-﻿# =====================================================================
+# =====================================================================
 #  سولان — بناء واختبار وإصدار على كل المنصات
 #  - كل دفع: يبني ويختبر (ويندوز 64+32، لينكس ثابت، ماك يونيفرسال)
 #  - وسم v* : يبني المُثبِّتات الأصلية وينشر إصداراً بكل الملفات
@@ -55,7 +55,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.2.0" ;;
+            *)  VER="1.3.1" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -114,7 +114,7 @@ jobs:
   # ------------------------------------------------------------------
   linux:
     name: لينكس x64 ثابت
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +126,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.2.0" ;;
+            *)  VER="1.3.1" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -162,7 +162,7 @@ jobs:
   # ------------------------------------------------------------------
   linux-arm64:
     name: لينكس ARM64 (JIT عبر QEMU)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -174,7 +174,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.2.0" ;;
+            *)  VER="1.3.1" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -211,7 +211,7 @@ jobs:
   linux-pkg:
     name: حزم لينكس deb و rpm
     needs: linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/download-artifact@v4
@@ -293,7 +293,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.2.0" ;;
+            *)  VER="1.3.1" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -361,7 +361,7 @@ jobs:
     name: نشر الإصدار
     needs: [windows, linux, linux-arm64, linux-pkg, macos]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v4
