@@ -430,6 +430,12 @@ NAT(rx_replace) {
   if (last < text->len) buf_add(&out, text->chars + last, text->len - last);
   free(caps); *res = mkstr(buf_cstr(&out), out.n); free(out.p); return true;
 }
+NAT(rx_names) {
+  STRA(0); char err[160]; Rx *rx = rx_get(AS_STR(a[0]), rx_flags_from(argc > 1 ? a[1] : NIL), err, sizeof err); if (!rx) FAIL("نمط غير صالح: %s", err);
+  List *l = new_list();
+  for (int i = 0; i < rx->nnames; i++) varr_push(&l->a, mkstr(rx->names[i], (int)strlen(rx->names[i])));
+  *res = OBJV(l); return true;
+}
 
 NAT(s_spawn) {
   SAFE();
@@ -502,6 +508,19 @@ NAT(n_digits_mode) {
 }
 NAT(f_size) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; if (sstat(AS_STR(a[0])->chars, &st) != 0) { *res = NIL; return true; } *res = NUMV((double)st.st_size); return true; }
 NAT(f_isdir) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; *res = BOOLV(sstat(AS_STR(a[0])->chars, &st) == 0 && S_ISDIR(st.st_mode)); return true; }
+NAT(f_isfile) { STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st; *res = BOOLV(sstat(AS_STR(a[0])->chars, &st) == 0 && S_ISREG(st.st_mode)); return true; }
+NAT(f_stat_info) {
+  STRA(0); PERMP(PM_READ, AS_STR(a[0])->chars); sstat_t st;
+  if (sstat(AS_STR(a[0])->chars, &st) != 0) { *res = NIL; return true; }
+  Map *m = new_map(); push(OBJV(m));
+  dset(&m->d, KN("حجم"), NUMV((double)st.st_size));
+  dset(&m->d, KN("مجلد"), BOOLV(S_ISDIR(st.st_mode)));
+  dset(&m->d, KN("ملف"), BOOLV(S_ISREG(st.st_mode)));
+  dset(&m->d, KN("تعديل"), NUMV((double)st.st_mtime));
+  dset(&m->d, KN("تغيير"), NUMV((double)st.st_ctime));
+  dset(&m->d, KN("وصول"), NUMV((double)st.st_atime));
+  vm.sp--; *res = OBJV(m); return true;
+}
 
 #ifndef _WIN32
 static char *abs_lexical(const char *in, char *out, size_t cap) {
@@ -718,16 +737,22 @@ static void init_natives(void) {
   MF(m, "اس", m_exp, 1, 1); MF(m, "قوة", m_pow, 2, 2); MF(m, "لوغ", m_log, 1, 2); MF(m, "لوغ10", m_log10, 1, 1);
   MF(m, "اكبر", m_max, 0, -1); MF(m, "اصغر", m_min, 0, -1); MF(m, "جيب_عكسي", m_asin, 1, 1); MF(m, "جتا_عكسي", m_acos, 1, 1);
   MF(m, "ظل_عكسي", m_atan, 1, 1); MF(m, "ظل2", m_atan2, 2, 2); MF(m, "بتر", m_trunc, 1, 1);
+  MF(m, "جيب_زائد", m_sinh, 1, 1); MF(m, "جتا_زائد", m_cosh, 1, 1); MF(m, "ظل_زائد", m_tanh, 1, 1);
+  MF(m, "وتر", m_hypot, 2, 2); MF(m, "جذر_مكعب", m_cbrt, 1, 1); MF(m, "لوغ2", m_log2, 1, 1); MF(m, "باقي", m_fmod, 2, 2); MF(m, "علامة", m_sign, 1, 1); MF(m, "الى_درجات", m_deg, 1, 1); MF(m, "الى_راديان", m_rad, 1, 1);
   dset(&m->d, KN("باي"), NUMV(M_PI)); dset(&m->d, KN("اي"), NUMV(M_E)); dset(&m->d, KX("لانهاية"), NUMV(INFINITY));
+  dset(&m->d, KN("لانهاية_سالبة"), NUMV(-INFINITY)); dset(&m->d, KN("نان"), NUMV(NAN)); dset(&m->d, KN("باي_على_2"), NUMV(M_PI_2)); dset(&m->d, KN("باي_على_4"), NUMV(M_PI_4));
   m = mkmod("ضخم");
   MF(m, "جمع", bg_add, 2, 2); MF(m, "طرح", bg_sub, 2, 2); MF(m, "ضرب", bg_mul, 2, 2); MF(m, "قسمة", bg_div_, 2, 2); MF(m, "باقي", bg_mod_, 2, 2);
   MF(m, "قوة", bg_pow, 2, 2); MF(m, "قارن", bg_cmp, 2, 2); MF(m, "مضروب", bg_fact, 1, 1); MF(m, "رقم", bg_num, 1, 1);
   MF(m, "قوة_مود", bg_powmod, 3, 3); MF(m, "من_هكس", bg_from_hex, 1, 1); MF(m, "إلى_هكس", bg_to_hex, 1, 2); MF(m, "من_بايتات", bg_from_bytes, 1, 1); MF(m, "إلى_بايتات", bg_to_bytes, 1, 2);
+  MF(m, "مطلق", bg_abs, 1, 1); MF(m, "نفي", bg_neg, 1, 1); MF(m, "القاسم_المشترك", bg_gcd, 2, 2); MF(m, "المضاعف_المشترك", bg_lcm, 2, 2);
   m = mkmod("عشوائي");
   MF(m, "رقم", r_num, 0, 0); MF(m, "صحيح", r_int, 2, 2); MF(m, "اختر", r_pick, 1, 1); MF(m, "اخلط", r_shuffle, 1, 1); MF(m, "بذرة", r_seed, 1, 1);
+  MF(m, "بين", r_between, 2, 2); MF(m, "عينة", r_sample, 2, 2);
   rng_state ^= (uint64_t)(now_sec() * 1e6) * 2654435761ULL; if (!rng_state) rng_state = 1;
   m = mkmod("زمن");
   MF(m, "الان", t_now, 0, 0); MF(m, "تاريخ", t_date, 0, 2); MF(m, "من_تاريخ", t_mk, 1, 2); MF(m, "تحليل", t_parse, 2, 3); MF(m, "ساعة", t_clock, 0, 0); MF(m, "نوم", t_sleep, 1, 1); MF(m, "تنسيق", t_format, 1, 2);
+  MF(m, "الان_مللي", t_nowms, 0, 0); MF(m, "منذ", t_since, 1, 1);
   m = mkmod("نظام");
   MF(m, "بيئة", s_env, 1, 2); MF(m, "ضبط_بيئة", s_setenv, 2, 2); MF(m, "طرفية", s_tty, 0, 0); MF(m, "حمل_env", s_loadenv, 0, 1); MF(m, "اخرج", s_exit, 0, 1); MF(m, "نفذ", s_exec, 1, 2); MF(m, "شغل", s_run, 1, 1); MF(m, "مسار", s_cwd, 0, 0);
 #ifdef __ANDROID__
@@ -738,8 +763,9 @@ static void init_natives(void) {
   m = mkmod("ملفات");
   MF(m, "اقرا", f_read, 1, 1); MF(m, "اكتب", f_write, 2, 2); MF(m, "الحق", f_append, 2, 2); MF(m, "موجود", f_exists, 1, 1);
   MF(m, "احذف", f_remove, 1, 1); MF(m, "حجم", f_size, 1, 1); MF(m, "هل_مجلد", f_isdir, 1, 1); MF(m, "مسار_مطلق", f_abs, 1, 1); MF(m, "انقل", f_move, 2, 2); MF(m, "انسخ", f_copy, 2, 2); MF(m, "سطور", f_lines, 1, 1); MF(m, "مسار_البيت", f_home, 0, 0); MF(m, "احذف_مجلد", f_rmdir, 1, 1); MF(m, "انشئ_مجلدات", f_mkdirs, 1, 1); MF(m, "احذف_شجرة", f_rmtree, 1, 1); MF(m, "هل_رابط", f_islink, 1, 1); MF(m, "انشئ_مجلد", f_mkdir, 1, 1); MF(m, "قائمة", f_list, 1, 1);
-  m = mkmod("جيسون"); MF(m, "ترميز", j_enc, 1, 2); MF(m, "فك", j_dec, 1, 1);
-  m = mkmod("شبكة"); MF(m, "جلب", net_fetch, 1, 2); MF(m, "جلب_متدفق", net_fetch_stream, 2, 3); MF(m, "خادم", net_serve, 2, 3); MF(m, "اقرا_طلب", net_readreq, 2, 2); MF(m, "اكتب_رد", net_writeresp, 2, 2); MF(m, "ترميز_رابط", net_urlenc, 1, 1); MF(m, "فك_رابط", net_urldec, 1, 1);
+  MF(m, "هل_ملف", f_isfile, 1, 1); MF(m, "معلومات", f_stat_info, 1, 1);
+  m = mkmod("جيسون"); MF(m, "ترميز", j_enc, 1, 2); MF(m, "فك", j_dec, 1, 1); MF(m, "هل_صالح", j_valid, 1, 1);
+  m = mkmod("شبكة"); MF(m, "جلب", net_fetch, 1, 2); MF(m, "جلب_متدفق", net_fetch_stream, 2, 3); MF(m, "خادم", net_serve, 2, 3); MF(m, "اقرا_طلب", net_readreq, 2, 2); MF(m, "اكتب_رد", net_writeresp, 2, 2); MF(m, "ترميز_رابط", net_urlenc, 1, 1); MF(m, "فك_رابط", net_urldec, 1, 1); MF(m, "حلل_رابط", net_urlparse, 1, 1);
   m = mkmod("سوكت");
   MF(m, "اتصل", sk_connect, 2, 3); MF(m, "استمع", sk_listen, 1, 2); MF(m, "اقبل", sk_accept, 1, 1); MF(m, "ارسل", sk_send, 2, 2);
   MF(m, "استقبل", sk_recv, 1, 2); MF(m, "بالضبط", sk_exact, 2, 2); MF(m, "سطر", sk_line, 1, 1); MF(m, "اغلق", sk_close, 1, 1);
@@ -768,8 +794,9 @@ static void init_natives(void) {
   MF(m, "chacha20_poly1305_فك", c_chacha_aead_dec, 4, 5);
   MF(m, "x25519_سر", c_x25519_sec, 0, 1); MF(m, "x25519_عام", c_x25519_pub, 1, 1); MF(m, "x25519_مشترك", c_x25519_shared, 2, 2);
   MF(m, "ed25519_سر", c_ed25519_sec, 0, 1); MF(m, "ed25519_عام", c_ed25519_pub, 1, 1); MF(m, "ed25519_وقّع", c_ed25519_sign, 2, 2); MF(m, "ed25519_تحقق", c_ed25519_verify, 3, 3);
+  MF(m, "crc32", c_crc32, 1, 1); MF(m, "pbkdf2_sha256", c_pbkdf2_sha256, 3, 4);
   m = mkmod("نمط");
-  MF(m, "ابحث", rx_find, 2, 3); MF(m, "هل", rx_test, 2, 3); MF(m, "مطابق_كامل", rx_full, 2, 3); MF(m, "كل", rx_all, 2, 3); MF(m, "قسم", rx_split, 2, 3); MF(m, "ابدل", rx_replace, 3, 4);
+  MF(m, "ابحث", rx_find, 2, 3); MF(m, "هل", rx_test, 2, 3); MF(m, "مطابق_كامل", rx_full, 2, 3); MF(m, "كل", rx_all, 2, 3); MF(m, "قسم", rx_split, 2, 3); MF(m, "ابدل", rx_replace, 3, 4); MF(m, "مجموعات", rx_names, 1, 2);
 #if SOLAN_FFI
   m = mkmod("ffi"); MF(m, "افتح", ffi_open, 0, 1); MF(m, "ربط", ffi_bind, 3, 3); MF(m, "ذاكرة", ffi_alloc, 1, 1); MF(m, "حرر", ffi_free, 1, 1);
   MF(m, "اقرأ_نص", ffi_read_str, 1, 2); MF(m, "اكتب_نص", ffi_write_str, 2, 2);
@@ -777,8 +804,8 @@ static void init_natives(void) {
   m = mkmod("ffi"); MF(m, "افتح", ffi_na, 0, 1); MF(m, "ربط", ffi_na, 3, 3); MF(m, "ذاكرة", ffi_na, 1, 1); MF(m, "حرر", ffi_na, 1, 1);
   MF(m, "اقرأ_نص", ffi_na, 1, 2); MF(m, "اكتب_نص", ffi_na, 2, 2);
 #endif
-  m = mkmod("قاعدة"); MF(m, "افتح", db_open, 1, 1); MF(m, "اغلق", db_close, 1, 1); MF(m, "نفذ", db_exec, 2, 3); MF(m, "استعلم", db_query, 2, 3);
-  m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1);
+  m = mkmod("قاعدة"); MF(m, "افتح", db_open, 1, 1); MF(m, "اغلق", db_close, 1, 1); MF(m, "نفذ", db_exec, 2, 3); MF(m, "استعلم", db_query, 2, 3); MF(m, "نسخة", db_version, 0, 0); MF(m, "دفعي", db_batch, 3, 3);
+  m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1); MF(m, "فك_zlib", z_unzlib, 1, 1); MF(m, "خام", z_raw_deflate, 1, 1); MF(m, "فك_خام", z_raw_inflate, 1, 1);
   m = mkmod("قاعدة_سريعة"); MF(m, "افتح", kv_open, 1, 1); MF(m, "ضع", kv_put, 3, 3); MF(m, "احصل", kv_get, 2, 3); MF(m, "يوجد", kv_has, 2, 2); MF(m, "احذف", kv_del, 2, 2); MF(m, "زد", kv_incr, 2, 3); MF(m, "مفاتيح", kv_keys, 1, 1); MF(m, "عدد", kv_count, 1, 1); MF(m, "احفظ", kv_flush, 1, 1); MF(m, "اضغط", kv_compact_nat, 1, 1); MF(m, "اغلق", kv_close, 1, 1);
   m = mkmod("حلقة"); loop_cbs = new_list(); pin((Obj *)loop_cbs);
   MF(m, "بعد", lp_after, 2, 2); MF(m, "كل", lp_every, 2, 2); MF(m, "الغ", lp_cancel, 1, 1); MF(m, "راقب", lp_watch, 2, 2);

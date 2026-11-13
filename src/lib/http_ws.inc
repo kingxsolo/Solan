@@ -23,6 +23,17 @@ static void url_decode(const char *s, int n, Buf *b, bool plus) {
 }
 NAT(net_urlenc) { STRA(0); Buf b; buf_init(&b); url_encode(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
 NAT(net_urldec) { STRA(0); Buf b; buf_init(&b); url_decode(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, true); *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
+NAT(net_urlparse) {
+  STRA(0); Url u; memset(&u, 0, sizeof u);
+  if (!parse_url(AS_STR(a[0])->chars, &u)) { *res = NIL; return true; }
+  Map *m = new_map(); push(OBJV(m));
+  dset(&m->d, KN("المخطط"), mkstr(u.scheme, (int)strlen(u.scheme)));
+  dset(&m->d, KN("المضيف"), mkstr(u.host, (int)strlen(u.host)));
+  dset(&m->d, KN("المنفذ"), NUMV(u.port));
+  dset(&m->d, KN("المسار"), mkstr(u.path, (int)strlen(u.path)));
+  dset(&m->d, KN("مؤمن"), BOOLV(u.tls));
+  vm.sp--; *res = OBJV(m); return true;
+}
 
 static bool dict_has_ci(Dict *d, const char *name) {
   if (!d) return false;

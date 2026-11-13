@@ -18,3 +18,6 @@ static bool z_deflate(const char *in, int n, Buf *out, int wbits) {
 NAT(z_gzip) { STRA(0); Buf b; buf_init(&b); if (!z_deflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, 31)) { free(b.p); FAIL("فشل الضغط (ذاكرة؟)"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
 NAT(z_gunzip) { STRA(0); Buf b; buf_init(&b); if (!z_inflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, 47)) { free(b.p); FAIL("بيانات مضغوطة غير صالحة"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
 NAT(z_zlib) { STRA(0); Buf b; buf_init(&b); if (!z_deflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, 15)) { free(b.p); FAIL("فشل الضغط (ذاكرة؟)"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
+NAT(z_unzlib) { STRA(0); Buf b; buf_init(&b); if (!z_inflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, 15)) { free(b.p); FAIL("بيانات zlib غير صالحة"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
+NAT(z_raw_deflate) { STRA(0); Buf b; buf_init(&b); if (!z_deflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, -15)) { free(b.p); FAIL("فشل الضغط (ذاكرة؟)"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }
+NAT(z_raw_inflate) { STRA(0); Buf b; buf_init(&b); if (!z_inflate(AS_STR(a[0])->chars, AS_STR(a[0])->len, &b, -15)) { free(b.p); FAIL("بيانات خام غير صالحة"); } *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true; }

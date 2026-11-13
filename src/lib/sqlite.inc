@@ -7,6 +7,7 @@ typedef struct {
   int (*sqlite3_column_type)(void *, int); const unsigned char *(*sqlite3_column_text)(void *, int); double (*sqlite3_column_double)(void *, int);
   int (*sqlite3_column_bytes)(void *, int); const void *(*sqlite3_column_blob)(void *, int);
   const char *(*sqlite3_errmsg)(void *); int (*sqlite3_changes)(void *); long long (*sqlite3_last_insert_rowid)(void *);
+  const char *(*sqlite3_libversion)(void);
 } SQL;
 static SQL sq; static int sq_state = 0; static void *dbs[64];
 #ifdef SOLAN_SQLITE_EMBED
@@ -18,12 +19,14 @@ extern int sqlite3_bind_int64(void *, int, long long); extern int sqlite3_column
 extern int sqlite3_column_type(void *, int); extern const unsigned char *sqlite3_column_text(void *, int); extern double sqlite3_column_double(void *, int);
 extern int sqlite3_column_bytes(void *, int); extern const void *sqlite3_column_blob(void *, int);
 extern const char *sqlite3_errmsg(void *); extern int sqlite3_changes(void *); extern long long sqlite3_last_insert_rowid(void *);
+extern const char *sqlite3_libversion(void);
 static bool sql_load(void) {
   if (sq_state) return sq_state > 0;
 #define SL(n) sq.n = n
   SL(sqlite3_open); SL(sqlite3_close); SL(sqlite3_prepare_v2); SL(sqlite3_step); SL(sqlite3_finalize); SL(sqlite3_bind_text); SL(sqlite3_bind_double);
   SL(sqlite3_bind_null); SL(sqlite3_bind_int64); SL(sqlite3_column_count); SL(sqlite3_column_name); SL(sqlite3_column_type); SL(sqlite3_column_text);
   SL(sqlite3_column_double); SL(sqlite3_column_bytes); SL(sqlite3_column_blob); SL(sqlite3_errmsg); SL(sqlite3_changes); SL(sqlite3_last_insert_rowid);
+  SL(sqlite3_libversion);
 #undef SL
   sq_state = 1; return true;
 }
@@ -41,6 +44,7 @@ static bool sql_load(void) {
   SL(sqlite3_open); SL(sqlite3_close); SL(sqlite3_prepare_v2); SL(sqlite3_step); SL(sqlite3_finalize); SL(sqlite3_bind_text); SL(sqlite3_bind_double);
   SL(sqlite3_bind_null); SL(sqlite3_bind_int64); SL(sqlite3_column_count); SL(sqlite3_column_name); SL(sqlite3_column_type); SL(sqlite3_column_text);
   SL(sqlite3_column_double); SL(sqlite3_column_bytes); SL(sqlite3_column_blob); SL(sqlite3_errmsg); SL(sqlite3_changes); SL(sqlite3_last_insert_rowid);
+  SL(sqlite3_libversion);
 #undef SL
   sq_state = 1; return true;
 }
@@ -97,3 +101,23 @@ static bool db_run(Value *a, int argc, Value *res, bool query) {
 }
 NAT(db_exec) { return db_run(a, argc, res, false); }
 NAT(db_query) { return db_run(a, argc, res, true); }
+NAT(db_version) {
+  if (!sql_load()) { *res = NIL; return true; }
+  const char *v = sq.sqlite3_libversion ? sq.sqlite3_libversion() : NULL;
+  *res = v ? mkstr(v, (int)strlen(v)) : NIL; return true;
+}
+NAT(db_batch) {
+  void *db; if (!sql_dbarg(a[0], &db)) return false;
+  if (!IS_T(a[1], O_STR)) { rt_error("استعلام SQL يجب أن يكون نصا"); return false; }
+  if (!IS_T(a[2], O_LIST)) { rt_error("المعاملات يجب أن تكون قائمة قوائم"); return false; }
+  List *l = AS_LIST(a[2]);
+  long long changes = 0;
+  for (int i = 0; i < l->a.n; i++) {
+    Value row = l->a.v[i];
+    if (!IS_T(row, O_LIST)) { rt_error("المعامل رقم %d يجب أن يكون قائمة", i + 1); return false; }
+    Value args3[3] = { a[0], a[1], row }, rv;
+    if (!db_run(args3, 3, &rv, false)) return false;
+    if (IS_T(rv, O_MAP)) { Value ch; if (mget(&AS_MAP(rv)->d, KX("متأثرة"), &ch) && IS_NUM(ch)) changes += (long long)ch.as.n; }
+  }
+  Map *m = new_map(); dset(&m->d, KX("متأثرة"), NUMV((double)changes)); *res = OBJV(m); return true;
+}

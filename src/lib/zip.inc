@@ -435,6 +435,13 @@ NAT(z_close) {
   return true;
 }
 
+NAT(z_has) {
+  ZipH *h; if (!zh_arg(a[0], &h)) return false;
+  STRA(1);
+  *res = BOOLV(z_find(h, AS_STR(a[1])->chars, (uint32_t)AS_STR(a[1])->len) != NULL);
+  return true;
+}
+
 static void zip_register(void) {
   Map *m = mkmod("أرشيف");
   MF(m, "افتح_كتابة", z_open_w, 1, 1);
@@ -446,5 +453,6 @@ static void zip_register(void) {
   MF(m, "اقرأ", z_read, 2, 2);
   MF(m, "استخرج", z_extract, 2, 3);
   MF(m, "فك_الكل", z_extract_all, 1, 2);
+  MF(m, "يوجد", z_has, 2, 2);
   MF(m, "اغلق", z_close, 1, 1);
 }

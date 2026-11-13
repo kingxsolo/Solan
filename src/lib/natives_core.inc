@@ -113,6 +113,16 @@ static bool minmax(int argc, Value *a, Value *res, bool mx) {
 NAT(m_max) { return minmax(argc, a, res, true); }
 NAT(m_min) { return minmax(argc, a, res, false); }
 NAT(m_atan2) { NUMA(0); NUMA(1); *res = NUMV(atan2(a[0].as.n, a[1].as.n)); return true; }
+NAT(m_hypot) { NUMA(0); NUMA(1); *res = NUMV(hypot(a[0].as.n, a[1].as.n)); return true; }
+NAT(m_sinh) { NUMA(0); *res = NUMV(sinh(a[0].as.n)); return true; }
+NAT(m_cosh) { NUMA(0); *res = NUMV(cosh(a[0].as.n)); return true; }
+NAT(m_tanh) { NUMA(0); *res = NUMV(tanh(a[0].as.n)); return true; }
+NAT(m_cbrt) { NUMA(0); *res = NUMV(cbrt(a[0].as.n)); return true; }
+NAT(m_log2) { NUMA(0); if (a[0].as.n <= 0) FAIL("لوغ2: القيمة يجب أن تكون أكبر من صفر"); *res = NUMV(log2(a[0].as.n)); return true; }
+NAT(m_fmod) { NUMA(0); NUMA(1); if (a[1].as.n == 0) FAIL("باقي: القاسم لا يكون صفرا"); *res = NUMV(fmod(a[0].as.n, a[1].as.n)); return true; }
+NAT(m_sign) { NUMA(0); double x = a[0].as.n; *res = NUMV(x > 0 ? 1 : x < 0 ? -1 : 0); return true; }
+NAT(m_deg) { NUMA(0); *res = NUMV(a[0].as.n * 180.0 / M_PI); return true; }
+NAT(m_rad) { NUMA(0); *res = NUMV(a[0].as.n * M_PI / 180.0); return true; }
 
 static uint64_t rng_state = 88172645463325252ULL;
 static uint64_t rng_next(void) { rng_state ^= rng_state << 13; rng_state ^= rng_state >> 7; rng_state ^= rng_state << 17; return rng_state; }
@@ -121,10 +131,21 @@ NAT(r_num) { *res = NUMV(rng_f()); return true; }
 NAT(r_int) { NUMA(0); NUMA(1); double lo = a[0].as.n, hi = a[1].as.n; if (hi < lo) FAIL("عشوائي.صحيح: الحد الأعلى أصغر من الأدنى"); *res = NUMV(floor(lo + rng_f() * (hi - lo + 1))); return true; }
 NAT(r_pick) { if (!IS_T(a[0], O_LIST)) FAIL("اختر تتطلب قائمة"); List *l = AS_LIST(a[0]); if (!l->a.n) { *res = NIL; return true; } *res = l->a.v[(int)(rng_f() * l->a.n)]; return true; }
 NAT(r_shuffle) { if (!IS_T(a[0], O_LIST)) FAIL("اخلط تتطلب قائمة"); List *l = AS_LIST(a[0]); for (int i = l->a.n - 1; i > 0; i--) { int j = (int)(rng_f() * (i + 1)); Value t = l->a.v[i]; l->a.v[i] = l->a.v[j]; l->a.v[j] = t; } *res = a[0]; return true; }
-NAT(r_seed) { NUMA(0); rng_state = (uint64_t)a[0].as.n * 2654435761ULL + 88172645463325252ULL; *res = NIL; return true; }
+NAT(r_seed) { NUMA(0); rng_state = (uint64_t)a[0].as.n * 2654435761ULL + 88172645463325252ULL; if (!rng_state) rng_state = 88172645463325252ULL; *res = NIL; return true; }
+NAT(r_between) { NUMA(0); NUMA(1); double lo = a[0].as.n, hi = a[1].as.n; if (hi < lo) FAIL("بين: الحد الأعلى أصغر من الأدنى"); *res = NUMV(lo + rng_f() * (hi - lo)); return true; }
+NAT(r_sample) {
+  if (!IS_T(a[0], O_LIST)) FAIL("عينة تتطلب قائمة"); NUMA(1); int k = (int)a[1].as.n;
+  List *l = AS_LIST(a[0]); if (k < 0 || k > l->a.n) FAIL("عينة: العدد أكبر من حجم القائمة");
+  List *out = new_list(); push(OBJV(out));
+  int n = l->a.n;
+  for (int i = 0; i < k; i++) { int j = (int)(rng_f() * (n - i)); varr_push(&out->a, l->a.v[j]); l->a.v[j] = l->a.v[n - 1 - i]; }
+  vm.sp--; *res = OBJV(out); return true;
+}
 
 static double now_sec(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
 NAT(t_now) { *res = NUMV(now_sec()); return true; }
+NAT(t_nowms) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); double ms = (double)ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6; if (ms >= 9e15) { char buf[32]; snprintf(buf, sizeof buf, "%.0f", ms); *res = mkstr(buf, (int)strlen(buf)); } else *res = NUMV(ms); return true; }
+NAT(t_since) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); NUMA(0); double d = (ts.tv_sec + ts.tv_nsec / 1e9) - a[0].as.n; *res = NUMV(d < 0 ? 0 : d); return true; }
 NAT(t_clock) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); *res = NUMV(ts.tv_sec + ts.tv_nsec / 1e9); return true; }
 NAT(t_sleep) { NUMA(0); fflush(stdout); struct timespec ts; double s = a[0].as.n; if (s < 0) s = 0; ts.tv_sec = (time_t)s; ts.tv_nsec = (long)((s - floor(s)) * 1e9); nanosleep(&ts, NULL); *res = NIL; return true; }
 NAT(t_format) {

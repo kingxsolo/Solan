@@ -131,6 +131,10 @@ NAT(j_dec) {
   STRA(0); JP j = {AS_STR(a[0])->chars, AS_STR(a[0])->chars + AS_STR(a[0])->len, false};
   Value v = jval(&j, 0); jws(&j); if (j.err || j.p != j.end) FAIL("جيسون غير صالح"); *res = v; return true;
 }
+NAT(j_valid) {
+  STRA(0); JP j = {AS_STR(a[0])->chars, AS_STR(a[0])->chars + AS_STR(a[0])->len, false};
+  Value v = jval(&j, 0); jws(&j); *res = BOOLV(!j.err && j.p == j.end); return true;
+}
 
 static uint32_t rol32(uint32_t x, int s) { return (x << s) | (x >> (32 - s)); }
 static uint32_t ror32(uint32_t x, int s) { return (x >> s) | (x << (32 - s)); }

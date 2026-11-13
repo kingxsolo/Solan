@@ -100,6 +100,58 @@ static int str_method(Str *s, int mid, Str *nm, int argc, Value *a, Value *res) 
       if (mid == M_PADL) buf_add(&b, s->chars, s->len);
       *res = mkstr(buf_cstr(&b), b.n); free(b.p); return 0;
     }
+    case M_TRIML: case M_TRIMR: {
+      NEED(0); const char *p = s->chars, *e = p + s->len;
+      if (mid == M_TRIML) while (p < e && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+      else while (e > p && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n' || e[-1] == '\r')) e--;
+      *res = mkstr(p, (int)(e - p)); return 0;
+    }
+    case M_CHRAT: {
+      NEED(1); ARGNUM(0); int n = u8_len(s->chars, s->len), i = (int)a[0].as.n;
+      if (i < 0) i += n;
+      if (i < 0 || i >= n) { rt_error("فهرس الحرف خارج النطاق"); return 1; }
+      int bx = u8_off(s->chars, s->len, i); int cs = u8_charsize(s->chars + bx);
+      *res = mkstr(s->chars + bx, cs); return 0;
+    }
+    case M_TITLE: case M_CAPT: {
+      NEED(0); char *t = xalloc(s->len + 1); memcpy(t, s->chars, s->len); t[s->len] = 0;
+      bool word = mid == M_CAPT, atstart = true;
+      for (int i = 0; i < s->len;) {
+        int cs = u8_charsize(t + i);
+        if (cs == 1) {
+          unsigned char c = (unsigned char)t[i];
+          if ((c >= 'a' && c <= 'z') && (word || atstart)) { t[i] = (char)(c - 32); atstart = false; }
+          else if (c >= 'A' && c <= 'Z') { if (!word && !atstart) t[i] = (char)(c + 32); atstart = false; }
+          else if (c == ' ' || c == '-' || c == '_' || c == '\t') atstart = true;
+          else atstart = false;
+        } else atstart = false;
+        i += cs;
+      }
+      *res = mkstr(t, s->len); free(t); return 0;
+    }
+    case M_ISALNUM: {
+      NEED(0); bool all = s->len > 0;
+      for (int i = 0; i < s->len && all;) {
+        int cs = u8_charsize(s->chars + i); uint32_t cp;
+        u8_decode((const unsigned char *)s->chars + i, &cp);
+        bool ok = (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') || (cp >= 0x600 && cp <= 0x6FF);
+        if (!ok) all = false;
+        i += cs;
+      }
+      *res = BOOLV(all); return 0;
+    }
+    case M_ISEMPTY: { NEED(0); *res = BOOLV(s->len == 0); return 0; }
+    case M_INDEXOF: { NEEDR(1, 2); ARGSTR(0); Str *t = AS_STR(a[0]); int from = 0; if (argc == 2) { ARGNUM(1); from = (int)a[1].as.n; int ln = u8_len(s->chars, s->len); if (from < 0) from += ln; if (from < 0) from = 0; from = u8_off(s->chars, s->len, from); }
+      if (t->len == 0) { *res = NUMV(argc == 2 ? u8_len(s->chars, from < s->len ? from : s->len) : 0); return 0; }
+      if (from >= s->len) { *res = NUMV(-1); return 0; }
+      const char *f = memmem(s->chars + from, s->len - from, t->chars, t->len);
+      *res = NUMV(f ? u8_len(s->chars, (int)(f - s->chars)) : -1); return 0; }
+    case M_COUNTVAL: { NEED(1); ARGSTR(0); Str *t = AS_STR(a[0]); int c = 0; if (t->len > 0) { const char *p = s->chars, *end = p + s->len; for (;;) { const char *f = memmem(p, end - p, t->chars, t->len); if (!f) break; c++; p = f + t->len; } } *res = NUMV(c); return 0; }
+    case M_TAKE: case M_SKIP: {
+      NEED(1); ARGNUM(0); int n = u8_len(s->chars, s->len), k = (int)a[0].as.n; if (k < 0) { rt_error("'%s' تتطلب عددا غير سالب", nm->chars); return 1; }
+      if (k > n) k = n; int x = mid == M_TAKE ? 0 : k, y = mid == M_TAKE ? k : n;
+      int bx = u8_off(s->chars, s->len, x), by = u8_off(s->chars, s->len, y); *res = mkstr(s->chars + bx, by - bx); return 0;
+    }
     default: return 2;
   }
 }
@@ -182,6 +234,38 @@ static int list_method(List *l, int mid, Str *nm, int argc, Value *a, Value *res
       NEEDR(1, 2); int x, y; slice_bounds(l->a.n, a, argc, &x, &y); List *o = new_list();
       for (int i = x; i < y; i++) varr_push(&o->a, l->a.v[i]); *res = OBJV(o); return 0;
     }
+    case M_ISEMPTY: { NEED(0); *res = BOOLV(l->a.n == 0); return 0; }
+    case M_INDEXOF: {
+      NEEDR(1, 2); int from = 0; if (argc == 2) { ARGNUM(1); from = (int)a[1].as.n; if (from < 0) from += l->a.n; if (from < 0) from = 0; }
+      for (int i = from; i < l->a.n; i++) if (values_equal(l->a.v[i], a[0])) { *res = NUMV(i); return 0; }
+      *res = NUMV(-1); return 0;
+    }
+    case M_COUNTVAL: { NEED(1); int c = 0; for (int i = 0; i < l->a.n; i++) if (values_equal(l->a.v[i], a[0])) c++; *res = NUMV(c); return 0; }
+    case M_MINV: case M_MAXV: {
+      NEED(0); if (l->a.n == 0) { rt_error("'%s' على قائمة فارغة", nm->chars); return 1; }
+      int bi = 0; for (int i = 1; i < l->a.n; i++) { int c = vm_cmp(l->a.v[i], l->a.v[bi]); if (c == 2) { rt_error("'%s': العناصر غير قابلة للمقارنة", nm->chars); return 1; } if (mid == M_MINV ? c < 0 : c > 0) bi = i; }
+      *res = l->a.v[bi]; return 0;
+    }
+    case M_AVG: {
+      NEED(0); if (l->a.n == 0) { rt_error("متوسط على قائمة فارغة"); return 1; }
+      double s = 0; for (int i = 0; i < l->a.n; i++) { if (!IS_NUM(l->a.v[i])) { rt_error("متوسط: العناصر يجب أن تكون أرقاما"); return 1; } s += l->a.v[i].as.n; }
+      *res = NUMV(s / l->a.n); return 0;
+    }
+    case M_TAKE: case M_SKIP: {
+      NEED(1); ARGNUM(0); int k = (int)a[0].as.n; if (k < 0) { rt_error("'%s' تتطلب عددا غير سالب", nm->chars); return 1; }
+      if (k > l->a.n) k = l->a.n; int x = mid == M_TAKE ? 0 : k, y = mid == M_TAKE ? k : l->a.n;
+      List *o = new_list(); for (int i = x; i < y; i++) varr_push(&o->a, l->a.v[i]); *res = OBJV(o); return 0;
+    }
+    case M_ZIP: {
+      NEED(1); if (!IS_T(a[0], O_LIST)) { rt_error("اقترن تتطلب قائمة"); return 1; }
+      List *o = AS_LIST(a[0]), *r = new_list(); int n = l->a.n < o->a.n ? l->a.n : o->a.n;
+      for (int i = 0; i < n; i++) { List *p = new_list(); varr_push(&p->a, l->a.v[i]); varr_push(&p->a, o->a.v[i]); varr_push(&r->a, OBJV(p)); }
+      *res = OBJV(r); return 0;
+    }
+    case M_EXTEND: {
+      NEED(1); if (!IS_T(a[0], O_LIST)) { rt_error("اضف_الكل يتطلب قائمة"); return 1; }
+      List *o = AS_LIST(a[0]); for (int i = 0; i < o->a.n; i++) varr_push(&l->a, o->a.v[i]); *res = OBJV(l); return 0;
+    }
     default: return 2;
   }
 }
@@ -206,6 +290,17 @@ static int map_method(Map *m, int mid, Str *nm, int argc, Value *a, Value *res) 
       NEED(1); if (!IS_T(a[0], O_MAP)) { rt_error("دمج يتطلب قاموسا"); return 1; }
       Map *o = AS_MAP(a[0]); for (int i = 0; i < o->d.n; i++) if (o->d.e[i].k.t != V_EMPTY) dset(&m->d, o->d.e[i].k, o->d.e[i].v);
       *res = OBJV(m); return 0;
+    }
+    case M_ISEMPTY: { NEED(0); *res = BOOLV(m->d.live == 0); return 0; }
+    case M_SETDEFAULT: {
+      NEED(2); Value t; if (!dget(&m->d, a[0], &t)) dset(&m->d, a[0], a[1]);
+      return dget(&m->d, a[0], &t) ? (*res = t, 0) : 0;
+    }
+    case M_MERGE2: {
+      NEED(1); if (!IS_T(a[0], O_MAP)) { rt_error("دمج_جديد يتطلب قاموسا"); return 1; }
+      Map *o = new_map(); for (int i = 0; i < m->d.n; i++) if (m->d.e[i].k.t != V_EMPTY) dset(&o->d, m->d.e[i].k, m->d.e[i].v);
+      Map *s = AS_MAP(a[0]); for (int i = 0; i < s->d.n; i++) if (s->d.e[i].k.t != V_EMPTY) dset(&o->d, s->d.e[i].k, s->d.e[i].v);
+      *res = OBJV(o); return 0;
     }
     default: return 2;
   }

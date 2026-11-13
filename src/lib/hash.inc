@@ -104,3 +104,57 @@ NAT(c_unhex) {
   *res = mkstr(buf_cstr(&b), b.n); free(b.p); return true;
 }
 NAT(c_rand) { NUMA(0); int n = (int)a[0].as.n; if (n < 0 || n > 1 << 20) FAIL("حجم غير صالح"); char *t = xalloc(n + 1); if (!os_random(t, (size_t)n)) for (int i = 0; i < n; i++) t[i] = (char)(rng_next() & 255); *res = mkstr(t, n); free(t); return true; }
+NAT(c_crc32) {
+  STRA(0); Str *s = AS_STR(a[0]);
+  uint32_t c = 0xFFFFFFFFu;
+  static uint32_t tbl[256]; static bool init = false;
+  if (!init) { for (uint32_t i = 0; i < 256; i++) { uint32_t k = i; for (int b = 0; b < 8; b++) k = (k & 1) ? 0xEDB88320u ^ (k >> 1) : k >> 1; tbl[i] = k; } init = true; }
+  for (int i = 0; i < s->len; i++) c = tbl[(c ^ (unsigned char)s->chars[i]) & 0xFF] ^ (c >> 8);
+  c = ~c;
+  char h[9]; snprintf(h, sizeof h, "%08x", c); *res = mkstr(h, 8); return true;
+}
+NAT(c_pbkdf2_sha256) {
+  STRA(0); STRA(1); NUMA(2); STRA(3);
+  Str *pw = AS_STR(a[0]), *salt = AS_STR(a[1]);
+  long iters = (long)a[2].as.n; long dklen = (long)(argc > 3 ? a[3].as.n : 32);
+  if (iters < 1 || iters > 10000000) FAIL("عدد التكرارات خارج النطاق (1 - 10000000)");
+  if (dklen < 1 || dklen > 4096) FAIL("طول المفتاح خارج النطاق (1 - 4096)");
+  uint8_t *out = (uint8_t *)xalloc((size_t)dklen);
+  uint32_t blocks = (uint32_t)((dklen + 31) / 32);
+  for (uint32_t blk = 1; blk <= blocks; blk++) {
+    uint8_t ib[4] = { (uint8_t)(blk >> 24), (uint8_t)(blk >> 16), (uint8_t)(blk >> 8), (uint8_t)blk };
+    uint8_t *first = (uint8_t *)xalloc(salt->len + 4);
+    memcpy(first, salt->chars, (size_t)salt->len); memcpy(first + salt->len, ib, 4);
+    uint8_t u[32], acc[32];
+    {
+      uint8_t k[64] = {0}, ip[64], op[64];
+      size_t kl = (size_t)pw->len;
+      if (kl > 64) { uint8_t kh[32]; sha256_raw((const uint8_t *)pw->chars, kl, kh); memcpy(k, kh, 32); } else memcpy(k, pw->chars, kl);
+      for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
+      size_t n1 = 64 + salt->len + 4;
+      uint8_t *t1 = (uint8_t *)xalloc(n1);
+      memcpy(t1, ip, 64); memcpy(t1 + 64, first, salt->len + 4);
+      sha256_raw(t1, n1, u); free(t1);
+      size_t n2 = 64 + 32;
+      uint8_t *t2 = (uint8_t *)xalloc(n2);
+      memcpy(t2, op, 64); memcpy(t2 + 64, u, 32);
+      sha256_raw(t2, n2, acc); free(t2);
+    }
+    for (long it = 1; it < iters; it++) {
+      uint8_t k[64] = {0}, ip[64], op[64];
+      size_t kl = (size_t)pw->len;
+      if (kl > 64) { uint8_t kh[32]; sha256_raw((const uint8_t *)pw->chars, kl, kh); memcpy(k, kh, 32); } else memcpy(k, pw->chars, kl);
+      for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
+      uint8_t *t1 = (uint8_t *)xalloc(96); memcpy(t1, ip, 64); memcpy(t1 + 64, u, 32);
+      sha256_raw(t1, 96, u); free(t1);
+      uint8_t *t2 = (uint8_t *)xalloc(96); memcpy(t2, op, 64); memcpy(t2 + 64, u, 32);
+      sha256_raw(t2, 96, u); free(t2);
+      for (int i = 0; i < 32; i++) acc[i] ^= u[i];
+    }
+    free(first);
+    int take = dklen - (int)((blk - 1) * 32) < 32 ? dklen - (int)((blk - 1) * 32) : 32;
+    memcpy(out + (blk - 1) * 32, acc, (size_t)take);
+  }
+  *res = hex_or_raw(out, (int)dklen, false);
+  free(out); return true;
+}

@@ -166,6 +166,27 @@ NAT(bg_fact) {
   *res = big_val(&r); free(r.d); return true;
 }
 NAT(bg_num) { Big x; if (!big_parse(a[0], &x)) FAIL("ليست عددا صحيحا"); double d = 0; for (int i = x.n - 1; i >= 0; i--) d = d * 4294967296.0 + x.d[i]; if (x.neg) d = -d; *res = NUMV(d); free(x.d); return true; }
+NAT(bg_abs) { Big x; if (!big_parse(a[0], &x)) FAIL("ليست عددا صحيحا"); x.neg = 0; *res = big_val(&x); free(x.d); return true; }
+NAT(bg_neg) { Big x; if (!big_parse(a[0], &x)) FAIL("ليست عددا صحيحا"); if (x.n) x.neg = !x.neg; *res = big_val(&x); free(x.d); return true; }
+NAT(bg_gcd) {
+  Big x, y; if (!big_parse(a[0], &x)) FAIL("القيمة الأولى ليست عددا صحيحا"); if (!big_parse(a[1], &y)) { free(x.d); FAIL("القيمة الثانية ليست عددا صحيحا"); }
+  x.neg = 0; y.neg = 0;
+  while (y.n > 0) { Big q, r; bmag_divmod(&x, &y, &q, &r); free(q.d); free(x.d); x = y; y = r; }
+  free(y.d);
+  *res = big_val(&x); free(x.d); return true;
+}
+NAT(bg_lcm) {
+  Big x, y; if (!big_parse(a[0], &x)) FAIL("القيمة الأولى ليست عددا صحيحا"); if (!big_parse(a[1], &y)) { free(x.d); FAIL("القيمة الثانية ليست عددا صحيحا"); }
+  if (x.n == 0 || y.n == 0) { *res = mkstr("0", 1); free(x.d); free(y.d); return true; }
+  x.neg = 0; y.neg = 0;
+  Big t = big_copy(&x), u = big_copy(&y);
+  while (u.n > 0) { Big q, r; bmag_divmod(&t, &u, &q, &r); free(q.d); free(t.d); t = u; u = r; }
+  free(u.d);
+  Big p = bmag_mul(&x, &y);
+  Big q2, g; bmag_divmod(&p, &t, &q2, &g);
+  *res = big_val(&q2);
+  free(q2.d); free(g.d); free(p.d); free(t.d); free(x.d); free(y.d); return true;
+}
 static Big mont_mul(const Big *a, const Big *b, const Big *n, uint32_t ninv, int L) {
   uint32_t *t = xalloc(sizeof(uint32_t) * (L + 2));
   memset(t, 0, sizeof(uint32_t) * (L + 2));
