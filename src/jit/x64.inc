@@ -107,6 +107,7 @@ static void jx_mulsd(XB *x, int d, int s) { jx_sse_rr(x, 0xF2, 0x0F59, d, s); }
 static void jx_divsd(XB *x, int d, int s) { jx_sse_rr(x, 0xF2, 0x0F5E, d, s); }
 static void jx_ucomisd(XB *x, int a, int b) { jx_sse_rr(x, 0x66, 0x0F2E, a, b); }
 static void jx_xorpd(XB *x, int d, int s) { jx_sse_rr(x, 0x66, 0x0F57, d, s); }
+static void jx_andpd(XB *x, int d, int s) { jx_sse_rr(x, 0x66, 0x0F54, d, s); }
 static void jx_cvttsd2si64(XB *x, int r, int xr) { jx_rr(x, 0xF2, 1, 0x0F2C, r, xr); }
 static void jx_cvttsd2si32(XB *x, int r, int xr) { jx_rr(x, 0xF2, 0, 0x0F2C, r, xr); }
 static void jx_cvtsi2sd64(XB *x, int xr, int r) { jx_rr(x, 0xF2, 1, 0x0F2A, xr, r); }

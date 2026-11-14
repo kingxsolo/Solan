@@ -464,6 +464,8 @@ static ssize_t w_recvfrom(int fd, void *b, size_t n, int f, struct sockaddr *a, 
 #define send(f, b, n, fl) w_send(f, b, n, fl)
 #define sendto(f, b, n, fl, a, l) w_sendto(f, b, n, fl, a, l)
 #define recvfrom(f, b, n, fl, a, l) w_recvfrom(f, b, n, fl, a, l)
+#define getsockname(f, a, l) getsockname(w_s(f), a, l)
+#define getpeername(f, a, l) getpeername(w_s(f), a, l)
 #define read(f, b, n) w_read(f, b, n)
 #define write(f, b, n) w_write(f, b, n)
 #define fcntl w_fcntl

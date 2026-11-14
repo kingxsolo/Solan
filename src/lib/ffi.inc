@@ -59,6 +59,53 @@ NAT(ffi_read_str) {
   int n = (argc > 1 && IS_NUM(a[1])) ? (int)a[1].as.n : (int)strlen(p); *res = mkstr(p, n); return true;
 }
 NAT(ffi_write_str) { PERM(PM_NATIVE); NUMA(0); STRA(1); memcpy((void *)(uintptr_t)a[0].as.n, AS_STR(a[1])->chars, AS_STR(a[1])->len + 1); *res = NIL; return true; }
+
+// ---- هياكل FFI: قراءة/كتابة حقول بذاكرة خام ----
+// قراءة_حقل(مؤشر, إزاحة, نوع): نوع "i8|i16|i32|i64|f32|f64|u8|u16|u32"
+NAT(ffi_read_field) {
+  PERM(PM_NATIVE); NUMA(0); NUMA(1); STRA(2);
+  const unsigned char *base = (const unsigned char *)(uintptr_t)a[0].as.n;
+  long off = (long)a[1].as.n;
+  const char *t = AS_STR(a[2])->chars;
+  if (!strcmp(t, "i8"))  { *res = NUMV((double)*(int8_t *)(base + off)); return true; }
+  if (!strcmp(t, "u8"))  { *res = NUMV((double)*(uint8_t *)(base + off)); return true; }
+  if (!strcmp(t, "i16")) { int16_t v; memcpy(&v, base + off, 2); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "u16")) { uint16_t v; memcpy(&v, base + off, 2); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "i32")) { int32_t v; memcpy(&v, base + off, 4); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "u32")) { uint32_t v; memcpy(&v, base + off, 4); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "i64")) { int64_t v; memcpy(&v, base + off, 8); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "f32")) { float v; memcpy(&v, base + off, 4); *res = NUMV((double)v); return true; }
+  if (!strcmp(t, "f64")) { double v; memcpy(&v, base + off, 8); *res = NUMV(v); return true; }
+  FAIL("ffi: نوع حقل غير معروف '%s' (المتاح: i8 u8 i16 u16 i32 u32 i64 f32 f64)", t);
+}
+// كتابة_حقل(مؤشر, إزاحة, نوع, قيمة)
+NAT(ffi_write_field) {
+  PERM(PM_NATIVE); NUMA(0); NUMA(1); STRA(2);
+  unsigned char *base = (unsigned char *)(uintptr_t)a[0].as.n;
+  long off = (long)a[1].as.n;
+  const char *t = AS_STR(a[2])->chars;
+  double v = IS_NUM(a[3]) ? a[3].as.n : (a[3].t == V_BOOL ? (a[3].as.b ? 1 : 0) : 0);
+  if (!strcmp(t, "i8"))  { *(int8_t *)(base + off) = (int8_t)v; *res = NIL; return true; }
+  if (!strcmp(t, "u8"))  { *(uint8_t *)(base + off) = (uint8_t)v; *res = NIL; return true; }
+  if (!strcmp(t, "i16")) { int16_t x = (int16_t)v; memcpy(base + off, &x, 2); *res = NIL; return true; }
+  if (!strcmp(t, "u16")) { uint16_t x = (uint16_t)v; memcpy(base + off, &x, 2); *res = NIL; return true; }
+  if (!strcmp(t, "i32")) { int32_t x = (int32_t)v; memcpy(base + off, &x, 4); *res = NIL; return true; }
+  if (!strcmp(t, "u32")) { uint32_t x = (uint32_t)v; memcpy(base + off, &x, 4); *res = NIL; return true; }
+  if (!strcmp(t, "i64")) { int64_t x = (int64_t)v; memcpy(base + off, &x, 8); *res = NIL; return true; }
+  if (!strcmp(t, "f32")) { float x = (float)v; memcpy(base + off, &x, 4); *res = NIL; return true; }
+  if (!strcmp(t, "f64")) { memcpy(base + off, &v, 8); *res = NIL; return true; }
+  FAIL("ffi: نوع حقل غير معروف '%s'", t);
+}
+// حجم_حقل(نوع): حجم الحقل بالبايتات
+NAT(ffi_field_size) {
+  PERM(PM_NATIVE); STRA(0);
+  const char *t = AS_STR(a[0])->chars;
+  if (!strcmp(t, "i8") || !strcmp(t, "u8")) { *res = NUMV(1); return true; }
+  if (!strcmp(t, "i16") || !strcmp(t, "u16") || !strcmp(t, "f32")) { *res = NUMV(t[0] == 'f' ? 4 : 2); return true; }
+  if (!strcmp(t, "i32") || !strcmp(t, "u32")) { *res = NUMV(4); return true; }
+  if (!strcmp(t, "i64") || !strcmp(t, "f64")) { *res = NUMV(8); return true; }
+  FAIL("ffi: نوع حقل غير معروف '%s'", t);
+}
 #else
 #define SOLAN_FFI 0
 NAT(ffi_na) { (void)argc; (void)a; FAIL("ffi غير متاح على هذه المعمارية (يتطلب بناء 64-بت)"); }

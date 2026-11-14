@@ -152,6 +152,91 @@ static int str_method(Str *s, int mid, Str *nm, int argc, Value *a, Value *res) 
       if (k > n) k = n; int x = mid == M_TAKE ? 0 : k, y = mid == M_TAKE ? k : n;
       int bx = u8_off(s->chars, s->len, x), by = u8_off(s->chars, s->len, y); *res = mkstr(s->chars + bx, by - bx); return 0;
     }
+    case M_PADCENTER: {
+      NEEDR(1, 2); ARGNUM(0); int w = (int)a[0].as.n, n = u8_len(s->chars, s->len);
+      Str *pad = argc > 1 && IS_T(a[1], O_STR) ? AS_STR(a[1]) : intern_c(" ");
+      if (n >= w) { *res = OBJV(s); return 0; }
+      int total = w - n, left = total / 2, right = total - left;
+      Buf b; buf_init(&b);
+      for (int i = 0; i < left; i++) buf_add(&b, pad->chars, pad->len);
+      buf_add(&b, s->chars, s->len);
+      for (int i = 0; i < right; i++) buf_add(&b, pad->chars, pad->len);
+      *res = mkstr(buf_cstr(&b), b.n); free(b.p); return 0;
+    }    case M_COUNTMATCH: {
+      NEED(1); Str *t = tostr(a[0]); int c = 0;
+      if (t->len > 0) { const char *p = s->chars, *end = p + s->len; for (;;) { const char *f = memmem(p, end - p, t->chars, t->len); if (!f) break; c++; p = f + t->len; } }
+      *res = NUMV(c); return 0;
+    }
+    case M_INDICES: {
+      NEED(1); Str *t = tostr(a[0]); List *out = new_list(); *res = OBJV(out);
+      if (t->len > 0) {
+        const char *p = s->chars, *end = p + s->len;
+        for (;;) {
+          const char *f = memmem(p, end - p, t->chars, t->len);
+          if (!f) break;
+          varr_push(&out->a, NUMV(u8_len(s->chars, (int)(f - s->chars))));
+          p = f + t->len;
+        }
+      }
+      return 0;
+    }
+    case M_MULTISPLIT: {
+      NEED(1); if (!IS_T(a[0], O_LIST)) { rt_error("قسم_متعدد تتطلب قائمة فواصل"); return 1; }
+      List *seps = AS_LIST(a[0]);
+      List *out = new_list(); *res = OBJV(out);
+      const char *p = s->chars, *end = p + s->len;
+      while (p < end) {
+        const char *best = NULL; int blen = 0;
+        for (int i = 0; i < seps->a.n; i++) {
+          if (!IS_T(seps->a.v[i], O_STR)) continue;
+          Str *sp2 = AS_STR(seps->a.v[i]);
+          if (sp2->len == 0) continue;
+          const char *f = memmem(p, end - p, sp2->chars, sp2->len);
+          if (f && (!best || f < best || (f == best && sp2->len > blen))) { best = f; blen = sp2->len; }
+        }
+        if (!best) { varr_push(&out->a, mkstr(p, (int)(end - p))); break; }
+        if (best > p || out->a.n == 0) varr_push(&out->a, mkstr(p, (int)(best - p)));
+        p = best + blen;
+        if (p >= end) varr_push(&out->a, mkstr("", 0));
+      }
+      return 0;
+    }
+    case M_STRIPDIAC: { // إزالة التشكيل (الحركات العربية + التطويل)
+      NEED(0); Buf b; buf_init(&b);
+      for (int i = 0; i < s->len;) {
+        uint32_t cp; int cs = u8_decode((const unsigned char *)s->chars + i, &cp);
+        bool diac = cp == 0x640 || (cp >= 0x64B && cp <= 0x65F) || cp == 0x670;
+        if (!diac) buf_add(&b, s->chars + i, cs);
+        i += cs;
+      }
+      *res = mkstr(buf_cstr(&b), b.n); free(b.p); return 0;
+    }
+    case M_NORMAR: { // تطبيع عربي كامل: إزالة تشكيل + توحيد الألف/الياء/التاء المربوطة
+      NEED(0); char tmp[4096];
+      if (s->len >= (int)sizeof tmp) { rt_error("النص طويل جدا للطبّع (الحد 4096 بايت)"); return 1; }
+      int n = norm_into(s->chars, s->len, tmp);
+      *res = OBJV(intern(tmp, n)); return 0;
+    }
+    case M_ISARABIC: { // هل النص عربي (كل الحروف عربية أو مسافات/أرقام)
+      NEED(0); bool any = false, all = true;
+      for (int i = 0; i < s->len;) {
+        uint32_t cp; int cs = u8_decode((const unsigned char *)s->chars + i, &cp);
+        bool ar = (cp >= 0x600 && cp <= 0x6FF) || cp == ' ' || (cp >= '0' && cp <= '9') || cp == '\n' || cp == '\t';
+        if (cp == ' ' || cp == '\n' || cp == '\t' || (cp >= '0' && cp <= '9')) { i += cs; continue; }
+        if (cp >= 0x600 && cp <= 0x6FF) any = true; else all = false;
+        i += cs;
+      }
+      *res = BOOLV(any && all); return 0;
+    }
+    case M_TASHKEEL: { // عدد علامات التشكيل
+      NEED(0); int c = 0;
+      for (int i = 0; i < s->len;) {
+        uint32_t cp; int cs = u8_decode((const unsigned char *)s->chars + i, &cp);
+        if (cp == 0x640 || (cp >= 0x64B && cp <= 0x65F) || cp == 0x670) c++;
+        i += cs;
+      }
+      *res = NUMV(c); return 0;
+    }
     default: return 2;
   }
 }
@@ -266,6 +351,132 @@ static int list_method(List *l, int mid, Str *nm, int argc, Value *a, Value *res
       NEED(1); if (!IS_T(a[0], O_LIST)) { rt_error("اضف_الكل يتطلب قائمة"); return 1; }
       List *o = AS_LIST(a[0]); for (int i = 0; i < o->a.n; i++) varr_push(&l->a, o->a.v[i]); *res = OBJV(l); return 0;
     }
+    case M_GROUPBY: {
+      NEED(1); Map *out = new_map(); push(OBJV(out));
+      for (int i = 0; i < l->a.n; i++) {
+        Value x = l->a.v[i], r; if (!call_fn(a[0], 1, &x, &r)) return 1;
+        Value bucket; List *bl;
+        if (dget(&out->d, r, &bucket)) bl = AS_LIST(bucket);
+        else { bl = new_list(); dset(&out->d, r, OBJV(bl)); }
+        varr_push(&bl->a, x);
+      }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_COUNTBY: {
+      NEED(1); Map *out = new_map(); push(OBJV(out));
+      for (int i = 0; i < l->a.n; i++) {
+        Value x = l->a.v[i], r; if (!call_fn(a[0], 1, &x, &r)) return 1;
+        Value c; double n2 = dget(&out->d, r, &c) ? c.as.n + 1 : 1;
+        dset(&out->d, r, NUMV(n2));
+      }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_CHUNK: {
+      NEED(1); ARGNUM(0); int sz = (int)a[0].as.n;
+      if (sz < 1) { rt_error("قسّم_قطع: حجم القطعة يجب أن يكون 1 على الأقل"); return 1; }
+      List *out = new_list();
+      for (int i = 0; i < l->a.n; i += sz) {
+        List *p = new_list();
+        for (int j = i; j < l->a.n && j < i + sz; j++) varr_push(&p->a, l->a.v[j]);
+        varr_push(&out->a, OBJV(p));
+      }
+      *res = OBJV(out); return 0;
+    }
+    case M_WINDOWED: {
+      NEED(1); ARGNUM(0); int w = (int)a[0].as.n;
+      if (w < 1) { rt_error("نوافذ: حجم النافذة يجب أن يكون 1 على الأقل"); return 1; }
+      List *out = new_list();
+      for (int i = 0; i + w <= l->a.n; i++) {
+        List *p = new_list();
+        for (int j = i; j < i + w; j++) varr_push(&p->a, l->a.v[j]);
+        varr_push(&out->a, OBJV(p));
+      }
+      *res = OBJV(out); return 0;
+    }
+    case M_DISTINCTBY: {
+      NEED(1); List *out = new_list(); push(OBJV(out)); Dict seen; memset(&seen, 0, sizeof seen);
+      for (int i = 0; i < l->a.n; i++) {
+        Value x = l->a.v[i], r; if (!call_fn(a[0], 1, &x, &r)) return 1;
+        Value t; if (!dget(&seen, r, &t)) { varr_push(&out->a, x); dset(&seen, r, BOOLV(true)); }
+      }
+      dfree(&seen); vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_SORTBY: {
+      NEED(1); int n = l->a.n; if (n < 2) { *res = OBJV(l); return 0; }
+      Value *keys = xalloc(sizeof(Value) * n);
+      for (int i = 0; i < n; i++) { Value x = l->a.v[i]; if (!call_fn(a[0], 1, &x, &keys[i])) { free(keys); return 1; } }
+      // فرز إدراجي مستقر يرتب المؤشرات حسب المفاتيح
+      int *idx = xalloc(sizeof(int) * n);
+      for (int i = 0; i < n; i++) idx[i] = i;
+      Value *kv = xalloc(sizeof(Value) * n);
+      memcpy(kv, keys, sizeof(Value) * n);
+      for (int i = 1; i < n; i++) {
+        int ti = idx[i]; Value tk = kv[i]; int j = i - 1;
+        while (j >= 0) { int c; if (!cmp_vals(kv[j], tk, NIL, &c)) { free(keys); free(idx); free(kv); return 1; } if (c > 0) { idx[j + 1] = idx[j]; kv[j + 1] = kv[j]; j--; } else break; }
+        idx[j + 1] = ti; kv[j + 1] = tk;
+      }
+      Value *nv = xalloc(sizeof(Value) * n);
+      for (int i = 0; i < n; i++) nv[i] = l->a.v[idx[i]];
+      memcpy(l->a.v, nv, sizeof(Value) * n);
+      free(keys); free(idx); free(kv); free(nv);
+      *res = OBJV(l); return 0;
+    }
+    case M_TAKEWHILE: case M_DROPWHILE: {
+      NEED(1); List *out = new_list(); push(OBJV(out));
+      int cut = l->a.n;
+      for (int i = 0; i < l->a.n; i++) {
+        Value x = l->a.v[i], r; if (!call_fn(a[0], 1, &x, &r)) return 1;
+        if (falsey(r)) { cut = i; break; }
+        cut = i + 1;
+      }
+      int x = mid == M_TAKEWHILE ? 0 : cut, y = mid == M_TAKEWHILE ? cut : l->a.n;
+      for (int i = x; i < y; i++) varr_push(&out->a, l->a.v[i]);
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_FLATDEEP: {
+      NEEDR(0, 1); int dmax = argc > 0 ? (int)a[0].as.n : -1; if (dmax < 0) dmax = 1 << 30;
+      List *out = new_list(); push(OBJV(out));
+      // تنفيذ تكراري بكومة أعماق: كل عنصر يُعالج مع عمقه المتبقي
+      typedef struct { Value v; int d; } FlatItem;
+      int wcap = l->a.n > 0 ? l->a.n : 16;
+      FlatItem *work = xalloc(sizeof(FlatItem) * wcap); int wn = 0;
+      for (int i = l->a.n - 1; i >= 0; i--) { work[wn].v = l->a.v[i]; work[wn].d = dmax; wn++; }
+      while (wn > 0) {
+        FlatItem it = work[--wn];
+        if (IS_T(it.v, O_LIST) && it.d > 0) {
+          List *s = AS_LIST(it.v);
+          if (wn + s->a.n > wcap) { wcap = wn + s->a.n; work = xrealloc(work, sizeof(FlatItem) * wcap); }
+          for (int j = s->a.n - 1; j >= 0; j--) { work[wn].v = s->a.v[j]; work[wn].d = it.d - 1; wn++; }
+        } else varr_push(&out->a, it.v);
+      }
+      free(work); vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_DEDUPCONSEC: {
+      NEED(0); List *out = new_list();
+      for (int i = 0; i < l->a.n; i++) if (i == 0 || !values_equal(l->a.v[i], l->a.v[i - 1])) varr_push(&out->a, l->a.v[i]);
+      *res = OBJV(out); return 0;
+    }
+    case M_ZIPWITH: {
+      NEED(2); if (!IS_T(a[0], O_LIST)) { rt_error("اقترن_مع تتطلب قائمة ثانية"); return 1; }
+      List *o = AS_LIST(a[0]); List *out = new_list(); push(OBJV(out));
+      int n = l->a.n < o->a.n ? l->a.n : o->a.n;
+      for (int i = 0; i < n; i++) {
+        Value argv[2] = {l->a.v[i], o->a.v[i]}, r;
+        if (!call_fn(a[1], 2, argv, &r)) return 1;
+        varr_push(&out->a, r);
+      }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_FOLDL: {
+      NEED(2); Value acc = a[1];
+      for (int i = 0; i < l->a.n; i++) { Value args[2] = {acc, l->a.v[i]}; if (!call_fn(a[0], 2, args, &acc)) return 1; }
+      *res = acc; return 0;
+    }
+    case M_SCANL: {
+      NEED(2); Value acc = a[1]; List *out = new_list(); push(OBJV(out)); varr_push(&out->a, acc);
+      for (int i = 0; i < l->a.n; i++) { Value args[2] = {acc, l->a.v[i]}; if (!call_fn(a[0], 2, args, &acc)) return 1; varr_push(&out->a, acc); }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
     default: return 2;
   }
 }
@@ -302,6 +513,60 @@ static int map_method(Map *m, int mid, Str *nm, int argc, Value *a, Value *res) 
       Map *s = AS_MAP(a[0]); for (int i = 0; i < s->d.n; i++) if (s->d.e[i].k.t != V_EMPTY) dset(&o->d, s->d.e[i].k, s->d.e[i].v);
       *res = OBJV(o); return 0;
     }
+    case M_MAPVALS: {
+      NEED(1); Map *out = new_map(); push(OBJV(out));
+      for (int i = 0; i < m->d.n; i++) {
+        if (m->d.e[i].k.t == V_EMPTY) continue;
+        Value r; if (!call_fn(a[0], 1, &m->d.e[i].v, &r)) return 1;
+        dset(&out->d, m->d.e[i].k, r);
+      }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_FILTERKEYS: {
+      NEED(1); Map *out = new_map(); push(OBJV(out));
+      for (int i = 0; i < m->d.n; i++) {
+        if (m->d.e[i].k.t == V_EMPTY) continue;
+        Value x = m->d.e[i].k, r; if (!call_fn(a[0], 1, &x, &r)) return 1;
+        if (!falsey(r)) dset(&out->d, m->d.e[i].k, m->d.e[i].v);
+      }
+      vm.sp--; *res = OBJV(out); return 0;
+    }
+    case M_INVERT: {
+      NEED(0); Map *out = new_map();
+      for (int i = 0; i < m->d.n; i++) if (m->d.e[i].k.t != V_EMPTY) dset(&out->d, m->d.e[i].v, m->d.e[i].k);
+      *res = OBJV(out); return 0;
+    }
+    case M_DEEPGET: {
+      NEEDR(1, 32); Value cur = OBJV(m);
+      for (int i = 0; i < argc; i++) {
+        if (IS_T(cur, O_MAP)) { Value t; if (dget(&AS_MAP(cur)->d, a[i], &t)) cur = t; else { cur = NIL; break; } }
+        else if (IS_T(cur, O_LIST)) { Value out; int gi = get_index(cur, a[i], &out); if (gi == 0) cur = out; else { cur = NIL; break; } }
+        else { cur = NIL; break; }
+      }
+      *res = cur; return 0;
+    }
+    case M_DEEPSET: {
+      NEED(2); // اضبط_عميق(مسار_قائمة, قيمة)
+      if (!IS_T(a[0], O_LIST)) { rt_error("اضبط_عميق تتطلب قائمة مسار"); return 1; }
+      List *path = AS_LIST(a[0]);
+      if (path->a.n == 0) { rt_error("اضبط_عميق: المسار فارغ"); return 1; }
+      Value cur = OBJV(m);
+      for (int i = 0; i < path->a.n - 1; i++) {
+        Value nxt;
+        if (IS_T(cur, O_MAP)) {
+          if (dget(&AS_MAP(cur)->d, path->a.v[i], &nxt)) cur = nxt;
+          else { Map *nm = new_map(); nxt = OBJV(nm); dset(&AS_MAP(cur)->d, path->a.v[i], nxt); cur = nxt; }
+        }
+        else if (IS_T(cur, O_LIST)) {
+          if (get_index(cur, path->a.v[i], &nxt)) { rt_error("اضبط_عميق: فهرس قائمة غير صالح في المسار"); return 1; }
+        }
+        else { rt_error("اضبط_عميق: العنصر الأوسط يجب أن يكون قاموسا أو قائمة"); return 1; }
+      }
+      if (IS_T(cur, O_MAP)) dset(&AS_MAP(cur)->d, path->a.v[path->a.n - 1], a[1]);
+      else if (IS_T(cur, O_LIST)) { if (set_index(cur, path->a.v[path->a.n - 1], a[1])) { rt_error("اضبط_عميق: فهرس قائمة غير صالح"); return 1; } }
+      else { rt_error("اضبط_عميق: العنصر الأخير يجب أن يكون قاموسا أو قائمة"); return 1; }
+      *res = OBJV(m); return 0;
+    }
     default: return 2;
   }
 }
@@ -311,4 +576,54 @@ static int builtin_method(Value r, Str *nm, int argc, Value *a, Value *res) {
   if (IS_T(r, O_LIST)) return list_method(AS_LIST(r), mid, nm, argc, a, res);
   if (IS_T(r, O_MAP)) return map_method(AS_MAP(r), mid, nm, argc, a, res);
   return 2;
+}
+
+// طرق الأرقام المدمجة (تُستدعى كـ 5.عدد_الى_حروف())
+static int num_method(Value r, Str *nm, int argc, Value *a, Value *res) {
+  if (!IS_NUM(r)) return 2;
+  Value idv; if (!dget(&vm.mid, OBJV(nm), &idv)) return 2; int mid = (int)idv.as.n;
+  double x = r.as.n;
+  switch (mid) {
+    case M_NUMTOWORDS: {
+      if (argc != 0) { rt_error("عدد_الى_حروف لا تأخذ وسائط"); return 1; }
+      if (x < 0 || x != floor(x) || x >= 1000000) { rt_error("عدد_الى_حروف تتطلب رقما صحيحا من 0 إلى 999999"); return 1; }
+      static const char *ones[] = {"صفر","واحد","اثنان","ثلاثة","أربعة","خمسة","ستة","سبعة","ثمانية","تسعة","عشرة","أحد عشر","اثنا عشر","ثلاثة عشر","أربعة عشر","خمسة عشر","ستة عشر","سبعة عشر","ثمانية عشر","تسعة عشر"};
+      static const char *tens[] = {"","","عشرون","ثلاثون","أربعون","خمسون","ستون","سبعون","ثمانون","تسعون"};
+      static const char *hundreds[] = {"","مئة","مئتان","ثلاثمئة","أربعمئة","خمسمئة","ستمئة","سبعمئة","ثمانمئة","تسعمئة"};
+      int n = (int)x; Buf b; buf_init(&b);
+      if (n < 20) buf_fmt(&b, "%s", ones[n]);
+      else if (n < 100) { int t = n / 10, o = n % 10; if (o) buf_fmt(&b, "%s و%s", ones[o], tens[t]); else buf_fmt(&b, "%s", tens[t]); }
+      else {
+        int h = n / 100, rr = n % 100;
+        buf_fmt(&b, "%s", hundreds[h]);
+        if (rr) { if (rr < 20) buf_fmt(&b, " و%s", ones[rr]); else { int t = rr / 10, o = rr % 10; if (o) buf_fmt(&b, " و%s و%s", ones[o], tens[t]); else buf_fmt(&b, " و%s", tens[t]); } }
+      }
+      *res = mkstr(buf_cstr(&b), b.n); free(b.p); return 0;
+    }
+    case M_ISARABIC: { rt_error("هل_عربي طريقة نصوص فقط"); return 1; }
+    case M_LEN: *res = NUMV(x == floor(x) && fabs(x) < 1e15 ? (double)(int)x : x); return 0;
+    case M_ABS: *res = NUMV(x < 0 ? -x : x); return 0;
+    case M_FLOORC: *res = NUMV(floor(x)); return 0;
+    case M_CEILC: *res = NUMV(ceil(x)); return 0;
+    case M_ROUNDC: *res = NUMV(round(x)); return 0;
+    case M_SQRTC: if (x < 0) { rt_error("الجذر التربيعي لرقم سالب"); return 1; } *res = NUMV(sqrt(x)); return 0;
+    case M_ISINTC: *res = BOOLV(x == floor(x) && fabs(x) < 9007199254740992.0); return 0;
+    case M_ISNANC: *res = BOOLV(x != x); return 0;
+    case M_ISFINTC: { double inf = x == (1.0/0.0) || x == -(1.0/0.0); *res = BOOLV(inf || x != x); return 0; }
+    case M_TRUNC: *res = NUMV(trunc(x)); return 0;
+    case M_TODIGITS: { // تحويل الرقم إلى أرقام عربية-هندية
+      char tmp[64]; char ar[192]; int an = 0;
+      snprintf(tmp, sizeof tmp, "%g", x);
+      for (int i = 0; tmp[i]; i++) {
+        char c = tmp[i];
+        if (c >= '0' && c <= '9') { // U+0660..U+0669 = 0xD9 0xA0..0xA9
+          ar[an++] = (char)0xD9; ar[an++] = (char)(0xA0 + (c - '0'));
+        } else if (c == '.') { ar[an++] = (char)0xD9; ar[an++] = (char)0xAB; } // فاصلة عربية U+066B
+        else if (c == '-') { ar[an++] = (char)0xD8; ar[an++] = (char)0x80; }  // سالب U+2212... استخدم الشرطة العربية U+066C؟ نستخدم '-'
+        else ar[an++] = c;
+      }
+      *res = mkstr(ar, an); return 0;
+    }
+    default: return 2;
+  }
 }

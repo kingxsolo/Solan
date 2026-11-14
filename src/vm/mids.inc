@@ -12,7 +12,18 @@
   X(M_INDEXOF, "موقع") X(M_TAKE, "خذ") X(M_SKIP, "اترك") \
   X(M_CHRAT, "حرف_عند") X(M_ISALNUM, "هل_حرف_بالحرف") X(M_TITLE, "عنوان_حالة") X(M_CAPT, "كبّر_اول") \
   X(M_TRIML, "نظف_يسار") X(M_TRIMR, "نظف_يمين") \
-  X(M_SETDEFAULT, "اضبط_افتراضي") X(M_ZIP, "اقترن") X(M_EXTEND, "اضف_الكل") X(M_MERGE2, "دمج_جديد")
+  X(M_SETDEFAULT, "اضبط_افتراضي") X(M_ZIP, "اقترن") X(M_EXTEND, "اضف_الكل") X(M_MERGE2, "دمج_جديد") \
+  X(M_GROUPBY, "جمع_حسب") X(M_COUNTBY, "عد_حسب") X(M_CHUNK, "قسّم_قطع") X(M_WINDOWED, "نوافذ") X(M_DISTINCTBY, "فريد_حسب") \
+  X(M_SORTBY, "رتب_حسب") X(M_TAKEWHILE, "خذ_طالما") X(M_DROPWHILE, "اترك_طالما") X(M_FLATDEEP, "سطّح_كلي") \
+  X(M_DEDUPCONSEC, "فريد_متتال") X(M_ZIPWITH, "اقترن_مع") X(M_FOLDL, "اطوي_يسار") X(M_SCANL, "تراكمي") \
+  X(M_PADCENTER, "املأ_وسط") X(M_COUNTMATCH, "عد_تطابق") X(M_INDICES, "مواقع") X(M_MULTISPLIT, "قسم_متعدد") \
+  X(M_MAPVALS, "حول_قيم") X(M_FILTERKEYS, "رشح_مفاتيح") X(M_INVERT, "اعكس_اتجاه") X(M_DEEPGET, "احصل_عميق") \
+  X(M_DEEPSET, "اضبط_عميق") X(M_TOENTRY, "ادخل") \
+  X(M_STRIPDIAC, "ازل_تشكيل") X(M_NORMAR, "طبّع") X(M_ISARABIC, "هل_عربي") X(M_TASHKEEL, "عد_تشكيل") \
+  X(M_ABS, "قيمة_مطلقة") X(M_FLOORC, "أرضية") X(M_CEILC, "سقف") X(M_ROUNDC, "قرّب") X(M_SQRTC, "جذر") \
+  X(M_ISINTC, "هل_صحيح") X(M_ISNANC, "هل_غير_معرف") X(M_ISFINTC, "هل_لانهائي") X(M_TRUNC, "اقطع") \
+  X(M_TODIGITS, "حول_ارقام_عربية") \
+  X(M_NUMTOWORDS, "عدد_الى_حروف")
 #define X_ENUM(id, s) id,
 enum { METHODS(X_ENUM) M_COUNT };
 #define X_NAME(id, s) s,

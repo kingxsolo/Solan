@@ -33,6 +33,34 @@ static int run(int base) {
   CASE(OP_Q_SETPOP) { frame->slots[ip[0]] = sp[-1]; sp--; ip += 2; NEXT(); }
 
   CASE(OP_JMOVE) RT("تعليمة JMOVE الداخلية لا تُنفذ في المفسّر");
+  CASE(OP_TYPEIS) { // فحص نوع مدمج لمطابقة الأنماط: uint8 opcode للنوع
+    Value v = PK(0); bool ok = false;
+    switch (READ8()) {
+      case 0: ok = IS_NUM(v); break;
+      case 1: ok = IS_NUM(v) && v.as.n == floor(v.as.n) && fabs(v.as.n) < 9007199254740992.0; break;
+      case 2: ok = IS_T(v, O_STR); break;
+      case 3: ok = v.t == V_BOOL; break;
+      case 4: ok = IS_T(v, O_LIST); break;
+      case 5: ok = IS_T(v, O_MAP); break;
+      case 6: ok = CALLABLE_OBJ(v); break;
+      case 7: ok = v.t == V_OBJ && v.as.o->t == O_INST; break;
+      case 8: ok = IS_T(v, O_CLS); break;
+      case 9: ok = IS_T(v, O_CORO); break;
+      default: ok = false;
+    }
+    sp[-1] = BOOLV(ok); NEXT();
+  }
+  CASE(OP_INRANGE) { // المدى ضمني: [أ, ب] — ب على القمة، أ تحتها، القيمة تحتهما
+    Value b = sp[-1], a2 = sp[-2], v = sp[-3];
+    if (!IS_NUM(a2) || !IS_NUM(b) || !IS_NUM(v)) RT("مدى في 'حالة' يتطلب أرقامًا");
+    sp -= 2; sp[-1] = BOOLV(v.as.n >= a2.as.n && v.as.n <= b.as.n); NEXT();
+  }
+  CASE(OP_IFACE) { // علّم الصنف على القمة كواجهة ثم اسحبه (موازنة المكدس)
+    Value v = PK(0);
+    if (IS_T(v, O_CLS)) AS_CLS(v)->is_iface = true;
+    sp--;
+    NEXT();
+  }
   CASE(OP_Q_LL) { PUSHL(frame->slots[ip[0]]); PUSHL(frame->slots[ip[2]]); ip += 3; NEXT(); }
   CASE(OP_Q_LP) {
     Value r = frame->slots[ip[0]];
@@ -142,8 +170,10 @@ static int run(int base) {
   }
   CASE(OP_CHECK) {
     uint16_t mk = (uint16_t)READ16(); List *inf = AS_LIST(CONSTV());
-    if (!type_ok(PK(0), mk, inf)) {
-      RT("خطأ في النوع: %s يتوقع '%s' لكن وجدت '%s'", AS_STR(inf->a.v[1])->chars, AS_STR(inf->a.v[0])->chars, type_name(PK(0)));
+    if (!type_ok_deep(PK(0), mk, inf)) {
+      Value bad = PK(0);
+      Str *dn = AS_STR(inf->a.v[0]), *cx = AS_STR(inf->a.v[1]);
+      RT("خطأ في النوع: %s يتوقع '%s' لكن وجدت '%s'", cx->chars, dn->chars, type_name(bad));
     }
     NEXT();
   }

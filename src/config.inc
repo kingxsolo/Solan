@@ -18,7 +18,7 @@
 #endif
 #include "platform/platform.inc"
 
-#define SOLAN_VERSION "1.3.2"
+#define SOLAN_VERSION "1.3.5"
 #define FRAMES_MAX 4000
 #define STACK_MAX (1 << 18)
 #define NEST_MAX 150

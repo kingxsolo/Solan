@@ -48,7 +48,7 @@ typedef struct { Obj o; Fun *f; Upv **upv; int upc; Map *globals; } Closure;
 typedef bool (*NativeFn)(int argc, Value *a, Value *res);
 typedef struct { Obj o; NativeFn fn; Str *name; int minar, maxar; void *ud; } Native;
 static Native *g_cur_native;
-typedef struct Class { Obj o; Str *name; Dict methods, statics; struct Class *super; } Class;
+typedef struct Class { Obj o; Str *name; Dict methods, statics; struct Class *super; bool is_iface; } Class;
 typedef struct { Obj o; Class *cls; Dict fields; bool fnf;   } Instance;
 #define CALLABLE_OBJ(v) (IS_OBJ(v) && ((v).as.o->t == O_CLO || (v).as.o->t == O_NAT || (v).as.o->t == O_BOUND || (v).as.o->t == O_CLS || (v).as.o->t == O_FUN))
 typedef struct { Obj o; Value recv, method; } Bound;
@@ -72,11 +72,11 @@ typedef struct {
   Frame *frames; int fcount, frames_max;
   Handler *handlers; int hcount, hmax;
   Upv *open;
-  struct Coro *cur_co; struct CtxNode *ctxs; Value yielded; bool nowrap, pending_throw; struct Class *promise_cls; Value fn_block, fn_start; int dbg_mode; bool dbg_step; int bps[64], nbps; const char *dbg_src; FILE *dbg_in;
+  struct Coro *cur_co; struct CtxNode *ctxs; Value yielded; bool nowrap, pending_throw; struct Class *promise_cls, *err_cls; Value fn_block, fn_start; int dbg_mode; bool dbg_step; int bps[64], nbps; const char *dbg_src; FILE *dbg_in;
   Dict builtins, natmods, modcache, kw, mid, ctxw, stdlibd;
   List *pins;
   Value exc; char *trace; int nest; char tr_file[512]; int tr_line;
-  Str *init_str, *tostr_str, *s_len, *s_this, *s_super, *s_from, *s_case, *s_default, *s_static, *s_prop, *s_enum;
+  Str *init_str, *tostr_str, *s_len, *s_this, *s_super, *s_from, *s_case, *s_default, *s_static, *s_prop, *s_enum, *s_msg, *s_kind, *s_line, *s_file, *s_trace;
   char *script_dir;
 } VM;
 static VM vm;

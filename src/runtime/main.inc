@@ -71,6 +71,7 @@ int main(int argc, char **argv) {
     else if (HASPFX(argv[ai], "--اسمح") || HASPFX(argv[ai], "--allow") || HASPFX(argv[ai], "--امنع") || HASPFX(argv[ai], "--deny")) { if (!parse_perm_flag(argv[ai])) return 64; ai++; }
     else if ((!strcmp(argv[ai], "--حد_وقت") || !strcmp(argv[ai], "--timeout")) && ai + 1 < argc) { int sec = atoi(argv[ai + 1]); if (sec > 0) os_set_timeout((unsigned)sec, limit_time_handler); ai += 2; }
     else if ((!strcmp(argv[ai], "--حد_ذاكرة") || !strcmp(argv[ai], "--max-mem")) && ai + 1 < argc) { long mb = atol(argv[ai + 1]); if (mb > 0) os_set_memlimit(mb); ai += 2; }
+    else if (!strcmp(argv[ai], "--تحذيرات") || !strcmp(argv[ai], "--warn")) { g_warn = true; ai++; }
     else if (!strcmp(argv[ai], "--بلا_لون") || !strcmp(argv[ai], "--no-color")) { g_color_off = true; ai++; }
     else if ((!strcmp(argv[ai], "--نقطة") || !strcmp(argv[ai], "--break")) && ai + 1 < argc) { vm.dbg_mode = 2; g_debug_compile = true; if (vm.nbps < 64) vm.bps[vm.nbps++] = atoi(argv[ai + 1]); ai += 2; }
     else break;
@@ -180,6 +181,15 @@ int main(int argc, char **argv) {
     Fun *cf = compile(cs, av[1], false); free(cs); if (cf) { printf("سليم: %s\n", av[1]); return 0; } return 65;
   }
   if (rest >= 2 && !strcmp(av[0], "-e")) return run_source(av[1], "<-e>");
+  // وضع العامل الفرعي: solan --عامل_فرعي <ملف_تجميد> <منفذ> <وضع>
+  if (rest >= 3 && (!strcmp(av[0], "--عامل_فرعي") || !strcmp(av[0], "--worker-sub"))) {
+    int port = atoi(av[2]); int mode = rest >= 4 ? atoi(av[3]) : 0;
+    return worker_entry(av[1], port, mode);
+  }
+  // وضع ناقل العملية: solan --ناقل_عملية <أمر> <منفذ_دخل> <منفذ_خرج> <منفذ_خطأ>
+  if (rest >= 5 && (!strcmp(av[0], "--ناقل_عملية") || !strcmp(av[0], "--proc-relay"))) {
+    return proc_relay_main(av[1], (unsigned short)atoi(av[2]), (unsigned short)atoi(av[3]), (unsigned short)atoi(av[4]));
+  }
   if (rest < 1) { repl(); return 0; }
   size_t n; char *src = read_file(av[0], &n);
   if (!src) { fprintf(stderr, "سولان: تعذّر فتح الملف '%s'\n", av[0]); return 66; }

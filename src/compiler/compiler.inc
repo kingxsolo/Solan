@@ -1,13 +1,23 @@
-typedef struct { Str *name; int depth; bool captured, isconst; uint16_t tmask; List *tinfo; } Local;
+typedef struct { Str *name; int depth; bool captured, isconst; uint16_t tmask; List *tinfo; int line; bool used; bool warnable; } Local;
 typedef struct { uint8_t index; bool isLocal; } UpvDesc;
 typedef enum { FT_SCRIPT, FT_FUNC, FT_METHOD, FT_INIT } FT;
 typedef struct Loop { struct Loop *enc; int start, depth, tryDepth, nbreaks, finBase; int breaks[256]; } Loop;
 typedef struct Compiler {
   struct Compiler *enc; Fun *fn; FT type; Local locals[256]; int lcount; UpvDesc upv[256]; int depth, tryDepth; Loop *loop;
   int finSlot[16], finTry[16], nfins; uint16_t rmask; List *rinfo;
+  bool dead; // المنطقة الحالية لا يُصل إليها (بعد return/break/continue)
 } Compiler;
 typedef struct ClassComp { struct ClassComp *enc; bool hasSuper; } ClassComp;
 static Str *g_cur_file = NULL;
+static bool g_warn = false; // تحذيرات المترجم (--تحذيرات)
+static int g_nwarn = 0;
+static bool g_iface_stub = false; // تجميع طريقة واجهة بلا جسم (توليد جسم تلقائي)
+static void cwarn(const char *fmt, ...) {
+  if (!g_warn) return;
+  va_list ap; va_start(ap, fmt); char msg[300]; vsnprintf(msg, sizeof msg, fmt, ap); va_end(ap);
+  fprintf(stderr, "تحذير [سطر %d]: %s\n", P.prev.line ? P.prev.line : P.cur.line, msg);
+  g_nwarn++;
+}
 static Compiler *C; static ClassComp *CC; static bool g_getter = false; static int g_kind = 0; static Str *g_arrow_first = NULL; static bool g_skip_lp = false; static bool g_debug_compile = false;
 
 static Chunk *chunk(void) { return &C->fn->ch; }
@@ -35,13 +45,22 @@ static void emit_loop(int start) {
   emit(OP_LOOP); int off = chunk()->n - start + 2; if (off > 0xffff) CERR("الحلقة كبيرة جدا"); emit16(off);
 }
 static void init_compiler(Compiler *c, FT type, Str *name) {
-  c->enc = C; c->type = type; c->lcount = 0; c->depth = 0; c->tryDepth = 0; c->loop = NULL; c->nfins = 0; c->rmask = 0; c->rinfo = NULL;
+  c->enc = C; c->type = type; c->lcount = 0; c->depth = 0; c->tryDepth = 0; c->loop = NULL; c->nfins = 0; c->rmask = 0; c->rinfo = NULL; c->dead = false;
   c->fn = new_fun(); c->fn->name = name; c->fn->file = g_cur_file; C = c;
   Local *l = &c->locals[c->lcount++]; l->depth = 0; l->captured = false; l->isconst = false; l->tmask = 0; l->tinfo = NULL;
   l->name = (type == FT_METHOD || type == FT_INIT) ? vm.s_this : NULL;
 }
 static void emit_check_fwd(void);
 static Fun *end_compiler(void) {
+  // تحذير عن المتغيرات المحلية غير المستخدمة في جسم الدالة نفسه (العمق 0)
+  if (g_warn && C->type != FT_SCRIPT) {
+    for (int i = 1; i < C->lcount; i++) { // نتجاوز 'هذا'
+      Local *l = &C->locals[i];
+      if (!l->name || l->depth < 0) continue;
+      if (l->depth == 0 && l->warnable && !l->used && l->name->chars[0] != '$' && l->name->chars[0] != '_')
+        cwarn("المتغير '%s' مُعرّف لكنه غير مستخدم", l->name->chars);
+    }
+  }
   if (C->type == FT_INIT) emit2(OP_GET_LOCAL, 0); else { emit(OP_NIL); emit_check_fwd(); }
   emit(OP_RETURN);
   Fun *f = C->fn; C = C->enc;
@@ -54,6 +73,17 @@ static Fun *end_compiler(void) {
 static void begin_scope(void) { C->depth++; }
 static void end_scope(void) {
   C->depth--;
+  // تحذير عن المتغيرات المحلية غير المستخدمة التي تخرج من النطاق
+  if (g_warn) {
+    for (int i = C->lcount - 1; i >= 0; i--) {
+      Local *l = &C->locals[i];
+      if (!l->name || l->depth < 0) continue;
+      if (l->depth <= C->depth) break;
+      Str *n = l->name;
+      if (l->warnable && !l->used && n->chars[0] != '$' && n->chars[0] != '_' && l->depth > 0)
+        cwarn("المتغير '%s' مُعرّف لكنه غير مستخدم", n->chars);
+    }
+  }
   while (C->lcount > 0 && C->locals[C->lcount - 1].depth > C->depth) { emit(C->locals[C->lcount - 1].captured ? OP_CLOSE_UPV : OP_POP); C->lcount--; }
 }
 static int add_local(Str *name, bool init, bool isconst) {
@@ -66,10 +96,14 @@ static int add_local(Str *name, bool init, bool isconst) {
   return C->lcount - 1;
 }
 
+static void add_local_w(Str *name, bool init, bool isconst, int line, bool warnable) {
+  int s = add_local(name, init, isconst);
+  C->locals[s].line = line; C->locals[s].used = false; C->locals[s].warnable = warnable && !g_debug_compile;
+}
 static int resolve_local(Compiler *c, Str *name, bool *isconst) {
   for (int i = c->lcount - 1; i >= 0; i--) {
     Local *l = &c->locals[i];
-    if (l->name && l->name == name) { if (l->depth == -1) CERR("لا يمكن قراءة المتغير داخل تعريفه"); *isconst = l->isconst; return i; }
+    if (l->name && l->name == name) { if (l->depth == -1) CERR("لا يمكن قراءة المتغير داخل تعريفه"); *isconst = l->isconst; l->used = true; return i; }
   }
   return -1;
 }
@@ -145,6 +179,16 @@ static void unary(bool ca) { REC_ENTER(); unary_impl(ca); P.rec--; }
 static void statement(void) { REC_ENTER(); statement_impl(); P.rec--; }
 static void declaration(void) { REC_ENTER(); declaration_impl(); P.rec--; }
 static void function(FT type, Str *name) { REC_ENTER(); function_impl(type, name); P.rec--; }
+// طريقة واجهة بلا جسم: دالة مصغرة (لا معاملات ظاهرة) تعيد عدمًا
+static void function_stub(Str *name) {
+  Compiler c; init_compiler(&c, FT_METHOD, name); begin_scope();
+  c.fn->getter = false; c.fn->kind = 0;
+  emit(OP_NIL); emit_check_fwd();
+  emit(OP_RETURN);
+  Fun *fn = end_compiler();
+  emit(OP_CLOSURE); emit16(make_const(OBJV(fn)));
+  for (int i = 0; i < fn->upc; i++) { emit(c.upv[i].isLocal ? 1 : 0); emit(c.upv[i].index); }
+}
 static void expression(void) { parse_prec(PREC_ASSIGN); }
 
 static void number(bool ca) { (void)ca; emit_const(NUMV(P.prev.num)); }
@@ -205,19 +249,65 @@ enum { TY_NIL = 1, TY_BOOL = 2, TY_NUM = 4, TY_STR = 8, TY_LIST = 16, TY_MAP = 3
 static const struct { const char *name; uint16_t mask; } TYPE_NAMES[] = {
   {"رقم", TY_NUM}, {"عدد", TY_NUM}, {"عدد_صحيح", TY_INT}, {"رقم_صحيح", TY_INT}, {"نص", TY_STR}, {"منطقي", TY_BOOL}, {"قائمة", TY_LIST}, {"قاموس", TY_MAP},
   {"دالة", TY_FUN}, {"عدم", TY_NIL}, {"اي", TY_ANY}, {"أي", TY_ANY}, {"كائن", TY_INST}, {"صنف", TY_CLS}, {"كوروتين", TY_CORO}, {NULL, 0}};
-static void type_atom(uint16_t *mask, List *info, Buf *disp) {
+// تحليل ذرة نوع (مع الأنواع العامة) — المواصفة العميقة: NIL، أو قائمة [قناع الحاوية, مواصفة كل عنصر...]
+static void consume_gt(void);
+static void type_atom1(uint16_t *mask, List *info, Buf *disp, Value *spec) {
+  *spec = NIL;
   if (check(T_NIL)) { advance(); *mask |= TY_NIL; buf_fmt(disp, "عدم"); return; }
   if (check(T_FUN)) { advance(); *mask |= TY_FUN; buf_fmt(disp, "دالة"); return; }
   if (!check(T_IDENT) || !P.cur.s) cerror_at(&P.cur, "توقعت اسم نوع");
   advance(); Str *nm = P.prev.s; uint16_t m = 0;
   for (int i = 0; TYPE_NAMES[i].name; i++) if (normstr(TYPE_NAMES[i].name) == nm) { m = TYPE_NAMES[i].mask; break; }
-  if (m) *mask |= m; else { *mask |= TY_CLASSNAME; varr_push(&info->a, OBJV(nm)); }
   buf_add(disp, P.prev.start, P.prev.len);
   if ((m == TY_LIST || m == TY_MAP) && check(T_LT)) {
-    advance(); buf_addc(disp, '<'); uint16_t dm = 0; List *dl = new_list(); Buf db; buf_init(&db);
-    do { type_atom(&dm, dl, &db); if (check(T_COMMA)) buf_addc(&db, ','); } while (match(T_COMMA));
-    consume(T_GT, "توقعت '>' بعد نوع العناصر"); buf_add(disp, db.p ? db.p : "", db.n); free(db.p); buf_addc(disp, '>');
+    *mask |= m;
+    advance(); buf_addc(disp, '<');
+    List *sl = new_list(); varr_push(&sl->a, NUMV(m)); // sl[0] = نوع الحاوية
+    Buf db; buf_init(&db);
+    do {
+      // اتحاد ذرات مع '?' اختياري
+      List *alt = new_list(); uint16_t am = 0; Buf ab; buf_init(&ab);
+      do {
+        uint16_t am1 = 0; Value sub;
+        type_atom1(&am1, info, &ab, &sub);
+        am |= am1;
+        if (!IS_NIL(sub)) varr_push(&alt->a, sub);
+        if (check(T_QUEST)) { advance(); am |= TY_NIL; buf_addc(&ab, '?'); }
+      } while (match(T_BOR) && (buf_fmt(&ab, " | "), true));
+      Value es;
+      if (alt->a.n == 0) es = NUMV(am);
+      else {
+        List *u = new_list(); varr_push(&u->a, NUMV(0)); // 0 = اتحاد بدائل
+        for (int i = 0; i < alt->a.n; i++) varr_push(&u->a, alt->a.v[i]);
+        es = OBJV(u);
+      }
+      varr_push(&sl->a, es);
+      buf_add(&db, ab.p ? ab.p : "", ab.n); free(ab.p);
+    } while (match(T_COMMA));
+    consume_gt();
+    buf_add(disp, db.p ? db.p : "", db.n); free(db.p); buf_addc(disp, '>');
+    *spec = OBJV(sl);
+    return;
   }
+  if (m) { *mask |= m; return; }
+  *mask |= TY_CLASSNAME; varr_push(&info->a, OBJV(nm)); *spec = OBJV(nm);
+}
+// استهلاك '>' مع دعم الأنواع العامة المتداخلة: '>>' دُمج في T_SHR، فنقسمه
+static void consume_gt(void) {
+  if (check(T_GT)) { advance(); return; }
+  if (check(T_SHR) || check(T_GE)) {
+    // الرمز الحالي يبدأ بـ '>': استهلك '>' الأولى فقط، والباقي يصبح P.cur مباشرة
+    const char *rs = P.cur.start + 1;
+    int rem = P.cur.len - 1;
+    P.prev = P.cur;
+    P.cur.t = T_GT; P.cur.start = rs; P.cur.len = rem; P.cur.s = NULL; P.cur.num = 0;
+    return;
+  }
+  consume(T_GT, "توقعت '>' بعد نوع العناصر");
+}
+static void type_atom(uint16_t *mask, List *info, Buf *disp) {
+  Value sp2; type_atom1(mask, info, disp, &sp2);
+  if (!IS_NIL(sp2)) varr_push(&info->a, sp2); // المواصفة العميقة لفحص العناصر وقت التشغيل
 }
 static void parse_type(uint16_t *mask, List **info, const char *ctx) {
   List *l = new_list(); Buf disp; buf_init(&disp); uint16_t m = 0;
@@ -251,7 +341,10 @@ static void named_variable(Str *name, bool ca) {
   uint8_t gop, sop; bool isconst = false; int arg = resolve_local(C, name, &isconst);
   if (arg >= 0) { gop = OP_GET_LOCAL; sop = OP_SET_LOCAL; }
   else if ((arg = resolve_upvalue(C, name, &isconst)) >= 0) { gop = OP_GET_UPV; sop = OP_SET_UPV; }
-  else { arg = make_const(OBJV(name)); gop = OP_GET_GLOBAL; sop = OP_SET_GLOBAL; isconst = is_gconst(name); }
+  else {
+    arg = make_const(OBJV(name)); gop = OP_GET_GLOBAL; sop = OP_SET_GLOBAL; isconst = is_gconst(name);
+    for (int i = 0; i < P.ngwarn; i++) if (P.gwarn_names[i] == name) { P.gwarn_used[i] = true; break; }
+  }
   bool glob = gop == OP_GET_GLOBAL;
 #define EMIT_ARG(op) do { emit(op); if (glob) emit16(arg); else emit((uint8_t)arg); } while (0)
   if (ca && is_assign_tok(P.cur.t)) {
@@ -353,9 +446,59 @@ static void unary_impl(bool ca) {
   (void)ca; TT op = P.prev.t; parse_prec(PREC_UNARY); emit(op == T_MINUS ? OP_NEG : OP_NOT);
 }
 
+static bool last_is_numconst(double *out) {
+  // قبل emit العملية الثنائية: آخر تعليمة هي CONST(يمين) [OP_CONST hi lo]
+  Chunk *c = chunk();
+  if (c->n < 3) return false;
+  if (c->code[c->n - 3] != OP_CONST) return false;
+  int ci = (c->code[c->n - 2] << 8) | c->code[c->n - 1];
+  if (ci < 0 || ci >= C->fn->ch.consts.n) return false;
+  Value v = C->fn->ch.consts.v[ci];
+  if (!IS_NUM(v)) return false;
+  *out = v.as.n;
+  return true;
+}
+static void drop_last_const(void) { Chunk *c = chunk(); c->n -= 3; }
+static void replace_last_const(double d) {
+  Chunk *c = chunk();
+  int ci = (c->code[c->n - 2] << 8) | c->code[c->n - 1];
+  C->fn->ch.consts.v[ci] = NUMV(d);
+}
+static bool fold_nums(double a, TT op, double b, double *out) {
+  switch (op) {
+    case T_PLUS: *out = a + b; return true;
+    case T_MINUS: *out = a - b; return true;
+    case T_STAR: *out = a * b; return true;
+    case T_SLASH: if (b != 0) { *out = a / b; return true; } return false;
+    case T_PCT: if (b != 0) { *out = fmod(a, b); return true; } return false;
+    case T_IDIV: if (b != 0) { *out = floor(a / b); return true; } return false;
+    case T_POW: *out = sol_pow(a, b); return true;
+    default: return false;
+  }
+}
 static void binary(bool ca) {
   (void)ca; TT op = P.prev.t; Prec pr = rules[op].prec;
   parse_prec(op == T_POW ? PREC_POW : (Prec)(pr + 1));
+  // طيّ التعابير الثابتة: رقم ثابت + رقم ثابت => ثابت واحد زمن الترجمة
+  double l, r;
+  if ((op == T_PLUS || op == T_MINUS || op == T_STAR || op == T_SLASH || op == T_PCT || op == T_IDIV || op == T_POW)
+      && last_is_numconst(&r)) {
+    Chunk *c = chunk();
+    // ثابت أيسر قبل التعليمة الأخيرة؟ يجب أن يكون التحميلان متتاليين: CONST ثم CONST
+    if (c->n >= 6 && c->code[c->n - 6] == OP_CONST) {
+      int cj = (c->code[c->n - 5] << 8) | c->code[c->n - 4];
+      if (cj >= 0 && cj < C->fn->ch.consts.n && IS_NUM(C->fn->ch.consts.v[cj])) {
+        double lv = C->fn->ch.consts.v[cj].as.n, out;
+        if (fold_nums(lv, op, r, &out)) {
+          // حوّل الثابت الأيسر إلى الناتج واحذف تحميل الثابت الأيمن (3 بايتات)
+          C->fn->ch.consts.v[cj] = NUMV(out);
+          c->n -= 3; // احذف CONST(يمين)
+          if (op == T_PLUS) { P.last_add_pos = -1; P.last_add_c = NULL; }
+          return;
+        }
+      }
+    }
+  }
   switch (op) {
     case T_PLUS: emit(OP_ADD); P.last_add_pos = chunk()->n - 1; P.last_add_c = C; break; case T_MINUS: emit(OP_SUB); break; case T_STAR: emit(OP_MUL); break;
     case T_SLASH: emit(OP_DIV); break; case T_PCT: emit(OP_MOD); break; case T_POW: emit(OP_POW); break;
@@ -469,6 +612,11 @@ static void function_impl(FT type, Str *name) {
     if (check(T_LC) && !brace_is_map()) { advance(); while (!check(T_RC) && !check(T_EOF)) declaration(); consume(T_RC, "توقعت '}' بعد جسم الدالة"); }
     else { expression(); emit_check(C->rmask, C->rinfo, NULL); emit(OP_RETURN); }
   }
+  else if (g_iface_stub) {
+    // جسم مُولّد لطريقة واجهة بلا تفعيل: يرمي خطأً واضحًا عند الاستدعاء
+    g_iface_stub = false;
+    emit(OP_NIL); emit(OP_RETURN);
+  }
   else { consume(T_LC, "توقعت '{' قبل جسم الدالة"); while (!check(T_RC) && !check(T_EOF)) declaration(); consume(T_RC, "توقعت '}' بعد جسم الدالة"); }
   Fun *fn = end_compiler();
   emit(OP_CLOSURE); emit16(make_const(OBJV(fn)));
@@ -476,7 +624,7 @@ static void function_impl(FT type, Str *name) {
 }
 
 static void block(void) {
-  consume(T_LC, "توقعت '{'"); begin_scope();
+  consume(T_LC, "توقعت '{'"); begin_scope(); C->dead = false;
   while (!check(T_RC) && !check(T_EOF)) declaration();
   consume(T_RC, "توقعت '}'"); end_scope();
 }
@@ -515,6 +663,7 @@ static void var_decl(bool isconst) {
   do {
     if (check(T_LB) || check(T_LC)) { destructure(isconst); continue; }
     Str *nm; int g = parse_var_name(isconst, &nm);
+    int vline = P.prev.line;
     uint16_t tm = 0; List *ti = NULL; char cx[200]; ctx_tok(cx, sizeof cx, "المتغير", &P.prev);
     if (match(T_COLON)) parse_type(&tm, &ti, cx);
     if (match(T_EQ)) { expression(); if (tm) emit_check(tm, ti, cx); }
@@ -524,6 +673,8 @@ static void var_decl(bool isconst) {
       else if (P.ngt < 256) { P.gtn[P.ngt] = nm; P.gtm[P.ngt] = tm; P.gti[P.ngt++] = ti; }
     }
     define_var(g);
+    if (C->depth > 0) { C->locals[C->lcount - 1].line = vline; C->locals[C->lcount - 1].used = false; C->locals[C->lcount - 1].warnable = !g_debug_compile; }
+    else if (g_warn && C->type == FT_SCRIPT && P.ngwarn < 256) { P.gwarn_names[P.ngwarn] = nm; P.gwarn_lines[P.ngwarn] = vline; P.gwarn_used[P.ngwarn] = false; P.ngwarn++; }
   } while (match(T_COMMA));
   match(T_SEMI);
 }
@@ -547,9 +698,21 @@ static void fun_decl(void) {
 }
 
 static void class_decl(void) {
+  bool iface = false;
+  // واجهة اسم { ... } — تعريف واجهة: أصناف الطرق فقط، وتُعلّم is_iface
+  // (الكلمة 'واجهة' في P.prev لأن declaration_impl استهلكها قبل الاستدعاء)
+  if (P.prev.t == T_IDENT && ctx_id(P.prev.s) == 7) iface = true;
+  else if (P.cur.t == T_IDENT && ctx_id(P.cur.s) == 7) {
+    Scanner sv = P.sc; Token nx = scan_token(); P.sc = sv;
+    if (nx.t == T_IDENT) { advance(); iface = true; }
+  }
   Str *cname; int g = parse_var_name(false, &cname);
   emit(OP_CLASS); emit16(make_const(OBJV(cname))); define_var(g);
   ClassComp cc; cc.enc = CC; cc.hasSuper = false; CC = &cc;
+  if (iface) {
+    // علّم الصنف كواجهة عبر OP_IFACE (يضبط is_iface على كائن الصنف)
+    named_variable(cname, false); emit(OP_IFACE);
+  }
   if (match(T_EXTENDS) || match(T_COLON)) {
     if (P.cur.t != T_IDENT) cerror_at(&P.cur, "توقعت اسم الصنف الأب"); advance();
     if (P.prev.s == cname) CERR("الصنف لا يرث من نفسه");
@@ -571,6 +734,26 @@ static void class_decl(void) {
     Str *mn = P.prev.s; int k = make_const(OBJV(mn));
     if (isStatic && check(T_EQ)) { advance(); expression(); match(T_SEMI); emit(OP_STATIC); emit16(k); continue; }
     g_getter = isGetter; g_kind = mkind;
+    if (iface && !check(T_LC)) {
+      // توقيع بلا جسم في واجهة: `اسم(...)` أو `اسم` — تُجمَّع كطريقة بجسم يرمي خطأ
+      // الاسم مُستهلك بالفعل في P.prev (سطر advance أعلاه)
+      Str *imn = P.prev.s; int ik = make_const(OBJV(imn));
+      // استهلك التوقيع: (وسائط اختيارية مع أنواع وقيم افتراضية)
+      if (check(T_LP)) { advance(); int pd = 1;
+        while (pd > 0 && !check(T_EOF)) {
+          if (check(T_LP)) pd++;
+          else if (check(T_RP)) pd--;
+          if (pd > 0) advance();
+        }
+        if (!check(T_RP)) cerror_at(&P.cur, "توقعت ')' بعد وسائط الطريقة");
+        advance(); // استهلك ')'
+      }
+      match(T_SEMI);
+      // دالة مصغرة بجسم فارغ (تعيد عدم)
+      function_stub(imn);
+      emit(OP_METHOD); emit16(ik);
+      continue;
+    }
     function(isStatic ? FT_FUNC : (mn == vm.init_str ? FT_INIT : FT_METHOD), mn);
     emit(isStatic ? OP_STATIC : OP_METHOD); emit16(k);
   }
@@ -615,9 +798,10 @@ static void if_stmt(void) {
   if (match(T_ELIF)) if_stmt();
   else if (match(T_ELSE)) { if (match(T_IF)) if_stmt(); else block(); }
   patch_jump(e);
+  C->dead = false; // نقطة الالتحام بعد الشرط يُصل إليها
 }
 static void loop_begin(Loop *l, int start) { l->finBase = C->nfins; l->enc = C->loop; l->start = start; l->depth = C->depth; l->tryDepth = C->tryDepth; l->nbreaks = 0; C->loop = l; }
-static void loop_end(Loop *l) { for (int i = 0; i < l->nbreaks; i++) patch_jump(l->breaks[i]); C->loop = l->enc; }
+static void loop_end(Loop *l) { for (int i = 0; i < l->nbreaks; i++) patch_jump(l->breaks[i]); C->loop = l->enc; C->dead = false; } // نقطة الالتحام بعد الحلقة يُصل إليها
 static void while_stmt(void) {
   Loop lp; int start = chunk()->n; loop_begin(&lp, start);
   expression(); int ex = emit_jump(OP_JIF); emit(OP_POP); block(); emit_loop(start);
@@ -719,9 +903,11 @@ static void pop_to_loop(void) {
 static void break_stmt(void) {
   if (!C->loop) CERR("'توقف' خارج حلقة"); match(T_SEMI); pop_to_loop();
   if (C->loop->nbreaks >= 256) CERR("'توقف' كثيرة"); C->loop->breaks[C->loop->nbreaks++] = emit_jump(OP_JUMP);
+  C->dead = true;
 }
 static void continue_stmt(void) {
   if (!C->loop) CERR("'استمر' خارج حلقة"); match(T_SEMI); pop_to_loop(); emit_loop(C->loop->start);
+  C->dead = true;
 }
 static void return_stmt(void) {
   if (C->type == FT_INIT && !(check(T_RC) || check(T_EOF) || check(T_SEMI) || P.cur.nl)) CERR("لا يمكن إرجاع قيمة من البناء");
@@ -729,6 +915,7 @@ static void return_stmt(void) {
   else expression();
   if (C->type != FT_INIT) emit_check(C->rmask, C->rinfo, NULL);
   match(T_SEMI); emit_fin_calls(0); emit(OP_RETURN);
+  C->dead = true; // الكود بعد الرجوع لا يُصل إليه
 }
 static Parser finP;
 static bool try_has_finally(void) {
@@ -821,6 +1008,11 @@ static void from_stmt(void) {
   } while (match(T_COMMA));
   emit(OP_POP); match(T_SEMI);
 }
+static Str *g_range_kw;
+static Str *range_kw(void) { if (!g_range_kw) g_range_kw = normstr("مدى"); return g_range_kw; }
+static bool check_next_lp(void);
+static bool type_atom_matches_kw(void);
+static int builtin_type_op(Str *tn);
 static void switch_stmt(void) {
   expression(); consume(T_LC, "توقعت '{' بعد تبديل"); begin_scope();
   int sub = add_local(intern_c("$s"), true, false); int ends[64], ne = 0;
@@ -829,7 +1021,22 @@ static void switch_stmt(void) {
       advance(); int bj[32], nb = 0;
       do {
         if (nb >= 32) CERR("قيم كثيرة في حالة واحدة");
-        emit2(OP_GET_LOCAL, (uint8_t)sub); expression(); emit(OP_EQ); bj[nb++] = emit_jump(OP_JIT); emit(OP_POP);
+        emit2(OP_GET_LOCAL, (uint8_t)sub);
+        // مطابقة أنماط موسعة:
+        if (check(T_IDENT) && type_atom_matches_kw()) {
+          // حالة <نوع> => فحص نوع القيمة (رقم/نص/منطقي/قائمة/قاموس/دالة/كائن/صنف/كوروتين)
+          advance(); Str *tn = P.prev.s;
+          int op = builtin_type_op(tn);
+          if (op < 0) cerror_at(&P.prev, "نوع غير معروف في 'حالة'");
+          emit(OP_TYPEIS); emit((uint8_t)op);
+        } else if (check(T_IDENT) && P.cur.s == range_kw() && check_next_lp()) {
+          // حالة مدى(أ, ب) => فحص أن القيمة ضمن المدى [أ, ب]
+          advance(); consume(T_LP, "توقعت '('"); expression(); consume(T_COMMA, "توقعت ','"); expression(); consume(T_RP, "توقعت ')'");
+          emit(OP_INRANGE);
+        } else {
+          expression(); emit(OP_EQ);
+        }
+        bj[nb++] = emit_jump(OP_JIT); emit(OP_POP);
       } while (match(T_COMMA));
       int skip = emit_jump(OP_JUMP);
       for (int i = 0; i < nb; i++) patch_jump(bj[i]);
@@ -841,6 +1048,30 @@ static void switch_stmt(void) {
   consume(T_RC, "توقعت '}'");
   for (int i = 0; i < ne; i++) patch_jump(ends[i]);
   end_scope();
+}
+static Str *g_range_kw = NULL;
+static bool check_next_lp(void) {
+  Scanner sv = P.sc; Token t = scan_token(); P.sc = sv;
+  return t.t == T_LP;
+}
+static bool type_atom_matches_kw(void) {
+  static Str *s_num, *s_int, *s_str, *s_bool, *s_list, *s_map, *s_fn, *s_inst, *s_cls, *s_coro, *s_init;
+  if (!s_init) { s_num = normstr("رقم"); s_int = normstr("عدد_صحيح"); s_str = normstr("نص"); s_bool = normstr("منطقي"); s_list = normstr("قائمة"); s_map = normstr("قاموس"); s_fn = normstr("قابل_للاستدعاء"); s_inst = normstr("كائن"); s_cls = normstr("صنف"); s_coro = normstr("كوروتين"); s_init = (Str *)1; }
+  if (P.cur.s == s_num || P.cur.s == s_int || P.cur.s == s_str || P.cur.s == s_bool || P.cur.s == s_list || P.cur.s == s_map || P.cur.s == s_fn || P.cur.s == s_inst || P.cur.s == s_cls || P.cur.s == s_coro) return true;
+  return false;
+}
+static int builtin_type_op(Str *tn) {
+  if (tn == normstr("رقم")) return 0;
+  if (tn == normstr("عدد_صحيح")) return 1;
+  if (tn == normstr("نص")) return 2;
+  if (tn == normstr("منطقي")) return 3;
+  if (tn == normstr("قائمة")) return 4;
+  if (tn == normstr("قاموس")) return 5;
+  if (tn == normstr("قابل_للاستدعاء")) return 6;
+  if (tn == normstr("كائن")) return 7;
+  if (tn == normstr("صنف")) return 8;
+  if (tn == normstr("كوروتين")) return 9;
+  return -1;
 }
 static void enum_decl(void) {
   Str *nm; int g = parse_var_name(true, &nm);
@@ -854,6 +1085,10 @@ static void enum_decl(void) {
   consume(T_RC, "توقعت '}'"); emit(OP_MAP); emit16(n); emit2(OP_CALL, 1); define_var(g);
 }
 static void statement_impl(void) {
+  if (C->dead && g_warn && !check(T_RC) && !check(T_EOF)) {
+    cwarn("كود لا يُصل إليه بعد return/توقف/استمر");
+    C->dead = false; // نحذر مرة واحدة فقط لكل كتلة
+  }
   if (match(T_IF)) if_stmt();
   else if (match(T_SWITCH)) switch_stmt();
   else if (match(T_REPEAT)) repeat_stmt();
@@ -885,6 +1120,12 @@ static void declaration_impl(void) {
     return;
   }
   if (match(T_CLASS)) class_decl();
+  // واجهة اسم { ... } — تعريف واجهة (يُجمَّع كصنف معلّم كواجهة)
+  else if (check(T_IDENT) && ctx_id(P.cur.s) == 7) {
+    Scanner sv = P.sc; Token nx = scan_token(); P.sc = sv;
+    if (nx.t == T_IDENT) { advance(); class_decl(); }
+    else statement();
+  }
   else if (match(T_FUN)) {
     soft_ident();
     if (P.cur.t == T_IDENT) fun_decl();
@@ -897,13 +1138,18 @@ static void declaration_impl(void) {
 }
 
 static Fun *compile(const char *src, const char *file, bool quiet) {
-  memset(&P.sc, 0, sizeof P.sc); P.sc.src = P.sc.cur = src; P.sc.line = 1; P.file = file; g_cur_file = intern_c(file); P.quiet = quiet; P.ngconst = 0; P.ngt = 0; P.last_add_c = NULL; P.last_add_pos = -1;
+  memset(&P.sc, 0, sizeof P.sc); P.sc.src = P.sc.cur = src; P.sc.line = 1; P.file = file; g_cur_file = intern_c(file); P.quiet = quiet; P.ngconst = 0; P.ngt = 0; P.last_add_c = NULL; P.last_add_pos = -1; P.ngwarn = 0;
   C = NULL; CC = NULL;
   P.rec = 0; P.nsoft = 0;
   if (setjmp(P.jb)) { C = NULL; CC = NULL; return NULL; }
   Compiler c; init_compiler(&c, FT_SCRIPT, NULL);
   P.cur = mk_tok(T_EOF, src, 0, 1, false); advance();
   while (!check(T_EOF)) declaration();
+  // تحذير عن المتغيرات العامة المعرفة في الملف وغير المستخدمة (البرنامج النصي الرئيسي فقط)
+  if (g_warn && C->type == FT_SCRIPT && C->enc == NULL) {
+    for (int i = 0; i < P.ngwarn; i++) if (!P.gwarn_used[i] && P.gwarn_names[i]->chars[0] != '$' && P.gwarn_names[i]->chars[0] != '_')
+      cwarn("المتغير العام '%s' مُعرّف لكنه غير مستخدم", P.gwarn_names[i]->chars);
+  }
   return end_compiler();
 }
 

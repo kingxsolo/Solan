@@ -90,6 +90,41 @@ NAT(n_is_list) { *res = BOOLV(IS_T(a[0], O_LIST)); return true; }
 NAT(n_is_map) { *res = BOOLV(IS_T(a[0], O_MAP)); return true; }
 NAT(n_is_nil) { *res = BOOLV(IS_NIL(a[0])); return true; }
 NAT(n_is_fn) { *res = BOOLV(IS_T(a[0], O_CLO) || IS_T(a[0], O_NAT) || IS_T(a[0], O_BOUND)); return true; }
+NAT(n_gcrun) { // اجمع_القمامة(): تشغيل دورة تنظيف كاملة الآن
+  collect();
+  *res = NUMV((double)vm.nobj);
+  return true;
+}
+NAT(n_gcnobj) { // عدد_الكائنات(): عدد الكائنات الحية الحالية
+  *res = NUMV((double)vm.nobj);
+  return true;
+}
+NAT(n_gcthresh) { // حد_القمامة(ن؟): قراءة/ضبط عتبة بدء التنظيف (بعدد الكائنات)
+  if (argc > 0) {
+    NUMA(0);
+    double t = a[0].as.n;
+    if (t < 1024) t = 1024;
+    vm.next_gc = (size_t)t;
+  }
+  *res = NUMV((double)vm.next_gc);
+  return true;
+}
+NAT(n_implements) { // يطبق(كائن, واجهة): فحص أن الكائن (أو صنفه) يملك كل طرق الواجهة
+  *res = BOOLV(false);
+  if (IS_T(a[1], O_CLS) && AS_CLS(a[1])->is_iface) {
+    if (!IS_T(a[0], O_INST) && !IS_T(a[0], O_CLS)) return true;
+    Class *c = IS_T(a[0], O_INST) ? AS_INST(a[0])->cls : AS_CLS(a[0]);
+    for (Class *w = AS_CLS(a[1]); w; w = w->super) {
+      for (int i = 0; i < w->methods.n; i++) {
+        if (w->methods.e[i].k.t != V_OBJ || w->methods.e[i].k.as.o->t != O_STR) continue;
+        Value m;
+        if (!dget(&c->methods, w->methods.e[i].k, &m)) return true; // طريقة ناقصة
+      }
+    }
+    *res = BOOLV(true);
+  }
+  return true;
+}
 NAT(n_has) {
   Value t; *res = BOOLV(false);
   if (IS_T(a[0], O_INST)) { STRA(1); *res = BOOLV(dget(&AS_INST(a[0])->fields, a[1], &t) || dget(&AS_INST(a[0])->cls->methods, a[1], &t)); }

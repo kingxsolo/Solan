@@ -324,6 +324,7 @@ static void jx_mulsd(XB *x, int d, int s) { jx_sse_rr(x, 0xF2, 0x0F59, d, s); }
 static void jx_divsd(XB *x, int d, int s) { jx_sse_rr(x, 0xF2, 0x0F5E, d, s); }
 static void jx_ucomisd(XB *x, int a, int b) { jx_emit(x, 0x1E602000u | ((uint32_t)b << 16) | ((uint32_t)a << 5)); jx_fpcc = 1; }
 static void jx_xorpd(XB *x, int d, int s) { jx_emit(x, 0x6E201C00u | ((uint32_t)s << 16) | ((uint32_t)d << 5) | (uint32_t)d); }
+static void jx_andpd(XB *x, int d, int s) { jx_emit(x, 0x4E201C00u | ((uint32_t)s << 16) | ((uint32_t)d << 5) | (uint32_t)d); }
 static void jx_cvttsd2si64(XB *x, int r, int xr) { jx_emit(x, 0x9E780000u | ((uint32_t)xr << 5) | (uint32_t)jx_g(r)); }
 static void jx_cvttsd2si32(XB *x, int r, int xr) { jx_emit(x, 0x1E780000u | ((uint32_t)xr << 5) | (uint32_t)jx_g(r)); }
 static void jx_cvtsi2sd64(XB *x, int xr, int r) { jx_emit(x, 0x9E620000u | ((uint32_t)jx_g(r) << 5) | (uint32_t)xr); }

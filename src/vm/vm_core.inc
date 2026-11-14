@@ -13,6 +13,57 @@ static int map_find_name(Dict *d, Str *name) {
   return -1;
 }
 
+// ترميز المواصفات العميقة:
+//   NIL              = بلا قيد
+//   NUMV(قناع)       = فحص قناع بسيط
+//   Str              = اسم صنف
+//   [NUMV(0), ب1, ب2...]        = اتحاد: يكفي مطابقة بديل واحد
+//   [NUMV(TY_LIST|TY_MAP), ع1, ع2...] = حاوية: كل العناصر يجب أن تطابق أحد المواصفات
+static bool type_ok(Value v, uint16_t mask, List *info);
+static bool spec_ok(Value v, Value spec, List *info, int depth) {
+  if (depth > 8) return true;
+  if (IS_NIL(spec)) return true;
+  if (IS_NUM(spec)) return type_ok(v, (uint16_t)spec.as.n, info);
+  if (IS_T(spec, O_STR)) { // اسم صنف
+    if (v.t != V_OBJ || v.as.o->t != O_INST) return false;
+    Str *want = AS_STR(spec);
+    for (Class *k = AS_INST(v)->cls; k; k = k->super) if (k->name == want) return true;
+    return false;
+  }
+  if (IS_T(spec, O_LIST)) {
+    List *u = AS_LIST(spec);
+    if (u->a.n == 0 || !IS_NUM(u->a.v[0])) return true;
+    uint16_t h = (uint16_t)u->a.v[0].as.n;
+    if (h == 0) { // اتحاد بدائل
+      for (int j = 1; j < u->a.n; j++) if (spec_ok(v, u->a.v[j], info, depth + 1)) return true;
+      return false;
+    }
+    if (h == TY_LIST || h == TY_MAP) { // حاوية عامة
+      if (!type_ok(v, h, info)) return false;
+      if (u->a.n < 2) return true;
+      List *l = IS_T(v, O_LIST) ? AS_LIST(v) : NULL;
+      Map *mp = IS_T(v, O_MAP) ? AS_MAP(v) : NULL;
+      if (h == TY_LIST && l) {
+        for (int i = 0; i < l->a.n; i++) {
+          bool any = false;
+          for (int j = 1; j < u->a.n; j++) if (spec_ok(l->a.v[i], u->a.v[j], info, depth + 1)) { any = true; break; }
+          if (!any) return false;
+        }
+      } else if (h == TY_MAP && mp) {
+        for (int i = 0; i < mp->d.n; i++) {
+          if (mp->d.e[i].k.t == V_EMPTY) continue;
+          bool any = false;
+          for (int j = 1; j < u->a.n; j++) if (spec_ok(mp->d.e[i].v, u->a.v[j], info, depth + 1)) { any = true; break; }
+          if (!any) return false;
+        }
+      }
+      return true;
+    }
+    return true;
+  }
+  return true;
+}
+
 static bool type_ok(Value v, uint16_t mask, List *info) {
   switch (v.t) {
     case V_NIL: case V_EMPTY: return mask & TY_NIL;
@@ -37,12 +88,23 @@ static bool type_ok(Value v, uint16_t mask, List *info) {
   }
 }
 
+// فحص يشمل العناصر (يستدعى من OP_CHECK عندما تحمل info مواصفة عميقة في آخر عنصر)
+static bool type_ok_deep(Value v, uint16_t mask, List *info) {
+  if (!type_ok(v, mask, info)) return false;
+  if (info->a.n >= 3) {
+    Value last = info->a.v[info->a.n - 1];
+    if (!IS_NIL(last) && !IS_NUM(last) && !IS_T(last, O_STR)) return spec_ok(v, last, info, 0);
+  }
+  return true;
+}
+
 static int run(int base);
 
 static Coro *new_coro(Closure *f, int argc, Value *slots);
 
 static bool call_sync(int argc);
 static int builtin_method(Value r, Str *nm, int argc, Value *a, Value *res);
+static int num_method(Value r, Str *nm, int argc, Value *a, Value *res);
 
 static bool call_closure(Closure *c, int argc) {
   Fun *f = c->f; int fixed = f->variadic ? f->arity - 1 : f->arity;
@@ -185,6 +247,7 @@ static bool invoke(Str *name, int argc) {
     }
   }
   Value res; int r = builtin_method(recv, name, argc, vm.sp - argc, &res);
+  if (r == 2) r = num_method(recv, name, argc, vm.sp - argc, &res);
   if (r == 2) { char sg[300]; suggest(sg, sizeof sg, name, &vm.mid, NULL, NULL); rt_error("لا توجد دالة '%s' للنوع '%s'%s", name->chars, type_name(recv), sg); return false; }
   if (r == 1) return false;
   vm.sp -= argc + 1; push(res); return true;

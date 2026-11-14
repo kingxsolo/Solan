@@ -113,45 +113,82 @@ NAT(c_crc32) {
   c = ~c;
   char h[9]; snprintf(h, sizeof h, "%08x", c); *res = mkstr(h, 8); return true;
 }
+static const uint32_t H256_INIT[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+// استكمال SHA-256 من حالة موجودة: معالجة rem بايت متبقية + padding + الطول الكلي total_len بالبايت
+static void sha256_tail(uint32_t h[8], const uint8_t *tail, size_t rem, uint64_t total_len) {
+  uint8_t t[128];
+  size_t off = 0;
+  while (rem - off >= 64) { sha256_blk(h, tail + off); off += 64; }
+  size_t r = rem - off;
+  memcpy(t, tail + off, r); t[r++] = 0x80;
+  size_t tot = (r + 8 <= 64) ? 64 : 128; memset(t + r, 0, tot - r);
+  uint64_t bits = total_len * 8; for (int k = 0; k < 8; k++) t[tot - 1 - k] = (bits >> (8 * k)) & 255;
+  sha256_blk(h, t); if (tot == 128) sha256_blk(h, t + 64);
+}
 NAT(c_pbkdf2_sha256) {
-  STRA(0); STRA(1); NUMA(2); STRA(3);
+  STRA(0); STRA(1); NUMA(2);
   Str *pw = AS_STR(a[0]), *salt = AS_STR(a[1]);
-  long iters = (long)a[2].as.n; long dklen = (long)(argc > 3 ? a[3].as.n : 32);
+  long iters = (long)a[2].as.n;
+  long dklen = 32;
+  if (argc > 3) {
+    // الوسيط الرابع يقبل رقما أو نصا (كان يُفرض نصا ثم يُقرأ كرقم — خلل أصلحه الآن)
+    Value dv = a[3];
+    if (IS_T(dv, O_STR)) {
+      Str *s = AS_STR(dv); char *t = xalloc((size_t)s->len + 1);
+      memcpy(t, s->chars, (size_t)s->len); t[s->len] = 0;
+      char *end; double d = strtod(t, &end);
+      bool ok = end != t && *end == 0; free(t);
+      if (!ok) FAIL("طول المفتاح يجب أن يكون رقما");
+      dv = NUMV(d);
+    }
+    if (!IS_NUM(dv)) FAIL("المعامل 4 يجب أن يكون رقما أو نصا");
+    dklen = (long)dv.as.n;
+  }
   if (iters < 1 || iters > 10000000) FAIL("عدد التكرارات خارج النطاق (1 - 10000000)");
   if (dklen < 1 || dklen > 4096) FAIL("طول المفتاح خارج النطاق (1 - 4096)");
+  // تحسين جذري: حالات وسطية (midstate) ثابتة لـ HMAC-SHA256 تُبنى مرة واحدة،
+  // فكل تكرار يكلف كتلتَي SHA-256 فقط بدل إعادة بناء HMAC كاملة (حتى 4 كتل + تخصيصات ذاكرة لكل تكرار).
+  uint8_t k[64] = {0};
+  size_t kl = (size_t)pw->len;
+  if (kl > 64) { uint8_t kh[32]; sha256_raw((const uint8_t *)pw->chars, kl, kh); memcpy(k, kh, 32); } else memcpy(k, pw->chars, kl);
+  uint32_t ih[8], oh[8];
+  {
+    uint8_t ip[64], op[64];
+    for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
+    memcpy(ih, H256_INIT, sizeof ih); memcpy(oh, H256_INIT, sizeof oh);
+    sha256_blk(ih, ip); sha256_blk(oh, op);
+  }
   uint8_t *out = (uint8_t *)xalloc((size_t)dklen);
   uint32_t blocks = (uint32_t)((dklen + 31) / 32);
   for (uint32_t blk = 1; blk <= blocks; blk++) {
     uint8_t ib[4] = { (uint8_t)(blk >> 24), (uint8_t)(blk >> 16), (uint8_t)(blk >> 8), (uint8_t)blk };
-    uint8_t *first = (uint8_t *)xalloc(salt->len + 4);
-    memcpy(first, salt->chars, (size_t)salt->len); memcpy(first + salt->len, ib, 4);
-    uint8_t u[32], acc[32];
+    // U1 = HMAC(pw, salt || int32be(blk)): الداخلي من ih ثم الخارجي من oh
+    uint8_t u[32];
     {
-      uint8_t k[64] = {0}, ip[64], op[64];
-      size_t kl = (size_t)pw->len;
-      if (kl > 64) { uint8_t kh[32]; sha256_raw((const uint8_t *)pw->chars, kl, kh); memcpy(k, kh, 32); } else memcpy(k, pw->chars, kl);
-      for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
-      size_t n1 = 64 + salt->len + 4;
-      uint8_t *t1 = (uint8_t *)xalloc(n1);
-      memcpy(t1, ip, 64); memcpy(t1 + 64, first, salt->len + 4);
-      sha256_raw(t1, n1, u); free(t1);
-      size_t n2 = 64 + 32;
-      uint8_t *t2 = (uint8_t *)xalloc(n2);
-      memcpy(t2, op, 64); memcpy(t2 + 64, u, 32);
-      sha256_raw(t2, n2, acc); free(t2);
+      uint32_t h[8]; memcpy(h, ih, sizeof h);
+      size_t n = (size_t)salt->len + 4;
+      uint8_t *buf = (uint8_t *)xalloc(n);
+      memcpy(buf, salt->chars, (size_t)salt->len); memcpy(buf + salt->len, ib, 4);
+      sha256_tail(h, buf, n, 64 + n);
+      free(buf);
+      uint8_t inner[32];
+      for (int i = 0; i < 8; i++) { inner[4 * i] = h[i] >> 24; inner[4 * i + 1] = h[i] >> 16; inner[4 * i + 2] = h[i] >> 8; inner[4 * i + 3] = h[i]; }
+      uint32_t oh2[8]; memcpy(oh2, oh, sizeof oh2);
+      sha256_tail(oh2, inner, 32, 96);
+      for (int i = 0; i < 8; i++) { u[4 * i] = oh2[i] >> 24; u[4 * i + 1] = oh2[i] >> 16; u[4 * i + 2] = oh2[i] >> 8; u[4 * i + 3] = oh2[i]; }
     }
+    uint8_t acc[32]; memcpy(acc, u, 32);
+    // التكرارات التالية: كل تكرار = كتلتا SHA-256 فقط، بلا أي تخصيص ذاكرة
     for (long it = 1; it < iters; it++) {
-      uint8_t k[64] = {0}, ip[64], op[64];
-      size_t kl = (size_t)pw->len;
-      if (kl > 64) { uint8_t kh[32]; sha256_raw((const uint8_t *)pw->chars, kl, kh); memcpy(k, kh, 32); } else memcpy(k, pw->chars, kl);
-      for (int i = 0; i < 64; i++) { ip[i] = k[i] ^ 0x36; op[i] = k[i] ^ 0x5c; }
-      uint8_t *t1 = (uint8_t *)xalloc(96); memcpy(t1, ip, 64); memcpy(t1 + 64, u, 32);
-      sha256_raw(t1, 96, u); free(t1);
-      uint8_t *t2 = (uint8_t *)xalloc(96); memcpy(t2, op, 64); memcpy(t2 + 64, u, 32);
-      sha256_raw(t2, 96, u); free(t2);
+      uint32_t h2[8]; memcpy(h2, ih, sizeof h2);
+      sha256_tail(h2, u, 32, 96);
+      uint8_t inner2[32];
+      for (int i = 0; i < 8; i++) { inner2[4 * i] = h2[i] >> 24; inner2[4 * i + 1] = h2[i] >> 16; inner2[4 * i + 2] = h2[i] >> 8; inner2[4 * i + 3] = h2[i]; }
+      uint32_t oh2[8]; memcpy(oh2, oh, sizeof oh2);
+      sha256_tail(oh2, inner2, 32, 96);
+      for (int i = 0; i < 8; i++) { u[4 * i] = oh2[i] >> 24; u[4 * i + 1] = oh2[i] >> 16; u[4 * i + 2] = oh2[i] >> 8; u[4 * i + 3] = oh2[i]; }
       for (int i = 0; i < 32; i++) acc[i] ^= u[i];
     }
-    free(first);
     int take = dklen - (int)((blk - 1) * 32) < 32 ? dklen - (int)((blk - 1) * 32) : 32;
     memcpy(out + (blk - 1) * 32, acc, (size_t)take);
   }

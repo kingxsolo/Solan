@@ -72,7 +72,7 @@ static void collect(void) {
   for (int i = 0; i < vm.fcount; i++) mark_obj((Obj *)vm.frames[i].clo);
   for (Upv *u = vm.open; u; u = u->next) mark_obj((Obj *)u);
   mark_dict(&vm.builtins); mark_dict(&vm.natmods); mark_dict(&vm.modcache); mark_dict(&vm.kw); mark_dict(&vm.mid); mark_dict(&vm.ctxw); mark_dict(&vm.stdlibd);
-  mark_val(vm.exc); mark_obj((Obj *)vm.pins); mark_val(vm.yielded); mark_obj((Obj *)vm.cur_co); mark_obj((Obj *)vm.promise_cls); mark_val(vm.fn_block); mark_val(vm.fn_start);
+  mark_val(vm.exc); mark_obj((Obj *)vm.pins); mark_val(vm.yielded); mark_obj((Obj *)vm.cur_co); mark_obj((Obj *)vm.promise_cls); mark_obj((Obj *)vm.err_cls); mark_val(vm.fn_block); mark_val(vm.fn_start);
   for (CtxNode *n = vm.ctxs; n; n = n->next) {
     for (Value *p = n->c.stack; p < n->c.sp; p++) mark_val(*p);
     for (int i = 0; i < n->c.fcount; i++) mark_obj((Obj *)n->c.frames[i].clo);
@@ -86,7 +86,7 @@ static void collect(void) {
     if ((*p)->mark) { (*p)->mark = false; p = &(*p)->next; }
     else { Obj *u = *p; *p = u->next; free_obj(u); }
   }
-  vm.next_gc = vm.nobj * 2 < 4096 ? 4096 : vm.nobj * 2;
+  vm.next_gc = vm.nobj * 4 < 8192 ? 8192 : vm.nobj * 4;
 }
 
 static int g_digits = 0;

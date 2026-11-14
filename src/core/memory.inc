@@ -334,7 +334,7 @@ static Native *new_native(Str *name, NativeFn fn, int mn, int mx) {
   Native *n = (Native *)newobj(sizeof(Native), O_NAT); n->name = name; n->fn = fn; n->minar = mn; n->maxar = mx; n->ud = NULL; return n;
 }
 static Class *new_class(Str *name) {
-  Class *c = (Class *)newobj(sizeof(Class), O_CLS); c->name = name; c->super = NULL; memset(&c->methods, 0, sizeof(Dict)); memset(&c->statics, 0, sizeof(Dict)); return c;
+  Class *c = (Class *)newobj(sizeof(Class), O_CLS); c->name = name; c->super = NULL; c->is_iface = false; memset(&c->methods, 0, sizeof(Dict)); memset(&c->statics, 0, sizeof(Dict)); return c;
 }
 static Instance *new_instance(Class *c) {
   Instance *i = (Instance *)newobj(sizeof(Instance), O_INST); i->cls = c; memset(&i->fields, 0, sizeof(Dict)); i->fnf = false; return i;

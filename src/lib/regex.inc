@@ -440,7 +440,31 @@ NAT(rx_names) {
 NAT(s_spawn) {
   SAFE();
 #if !SOLAN_FORK
-  FAIL("هذه الدالة غير متاحة على هذا النظام (تتطلب fork): استخدم WSL أو Linux");
+  STRA(0);
+  // ويندوز: نشغّل "cmd /c الأمر" كعملية solan ناقلة (--ناقل_عملية) تربط
+  // stdin/stdout/stderr للأمر بثلاثة سوكتات loopback — نفس عقد POSIX
+  // (قواميس مقبض/دخل/خرج/خطأ) وكل مقبض قابل للمراقبة بحلقة الأحداث.
+  int li[3] = {-1, -1, -1}; unsigned short lp[3] = {0, 0, 0};
+  for (int i = 0; i < 3; i++) if (w_listen_local(&li[i], &lp[i]) < 0) {
+    for (int j = 0; j <= i; j++) if (li[j] >= 0) close(li[j]);
+    FAIL("تعذّر إنشاء قنوات العملية");
+  }
+  char self[PATH_MAX]; if (!os_self_exe(self, sizeof self)) FAIL("تعذّر تحديد مسار المفسر");
+  char sc[512]; snprintf(sc, sizeof sc, "cmd /c %s", AS_STR(a[0])->chars);
+  char p0[8], p1[8], p2[8];
+  snprintf(p0, sizeof p0, "%u", lp[0]); snprintf(p1, sizeof p1, "%u", lp[1]); snprintf(p2, sizeof p2, "%u", lp[2]);
+  char *av[8] = {self, "--ناقل_عملية", sc, p0, p1, p2, NULL};
+  HANDLE ph = NULL; DWORD pid = 0;
+  if (w_spawn_argv(av, &ph, &pid) != 0) { for (int i = 0; i < 3; i++) close(li[i]); FAIL("تعذّر تشغيل العملية"); }
+  int cfd[3];
+  for (int i = 0; i < 3; i++) {
+    cfd[i] = w_accept_local(li[i], 15000); close(li[i]);
+    if (cfd[i] < 0) { for (int j = 0; j < i; j++) close(cfd[j]); TerminateProcess(ph, 1); CloseHandle(ph); FAIL("انتهت مهلة قنوات العملية"); }
+    fd_setup(cfd[i]); fflag[cfd[i]] |= 8;
+  }
+  w_track_proc(ph, pid);
+  Map *r = new_map(); dset(&r->d, KN("pid"), NUMV(pid)); dset(&r->d, KN("دخل"), NUMV(cfd[0])); dset(&r->d, KN("خرج"), NUMV(cfd[1])); dset(&r->d, KX("خطأ"), NUMV(cfd[2]));
+  *res = OBJV(r); return true;
 #else
   STRA(0); int in[2], out[2], er[2]; if (pipe(in) < 0 || pipe(out) < 0 || pipe(er) < 0) FAIL("تعذّر إنشاء أنابيب");
   if (in[1] >= MAXFD || out[0] >= MAXFD || er[0] >= MAXFD) FAIL("عدد الاتصالات كبير جدا");
@@ -480,7 +504,20 @@ NAT(s_is_std) {
   STRA(0); Str *k = normstr(AS_STR(a[0])->chars); Value v;
   *res = BOOLV(dget(&vm.natmods, OBJV(k), &v) || dget(&vm.stdlibd, OBJV(k), &v)); return true;
 }
-NAT(s_kill) { NUMA(0); *res = BOOLV(kill((pid_t)a[0].as.n, argc > 1 && IS_NUM(a[1]) ? (int)a[1].as.n : SIGTERM) == 0); return true; }
+NAT(s_kill) {
+  NUMA(0);
+#if !SOLAN_FORK
+  DWORD pid = (DWORD)a[0].as.n;
+  HANDLE h = w_proc_by_pid(pid);
+  if (h && TerminateProcess(h, 1)) { *res = BOOLV(true); return true; }
+  // محاولة عامة عبر OpenProcess (لعمليات لم ننشئها)
+  h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+  if (!h) { *res = BOOLV(false); return true; }
+  BOOL ok = TerminateProcess(h, 1); CloseHandle(h); *res = BOOLV(ok != 0); return true;
+#else
+  *res = BOOLV(kill((pid_t)a[0].as.n, argc > 1 && IS_NUM(a[1]) ? (int)a[1].as.n : SIGTERM) == 0); return true;
+#endif
+}
 NAT(n_hl_ansi) { STRA(0); Buf o; buf_init(&o); hl_range(AS_STR(a[0])->chars, AS_STR(a[0])->len, &o, false, 0); *res = mkstr(buf_cstr(&o), o.n); free(o.p); return true; }
 NAT(n_hl_html) { STRA(0); Buf o; buf_init(&o); hl_range(AS_STR(a[0])->chars, AS_STR(a[0])->len, &o, true, 0); *res = mkstr(buf_cstr(&o), o.n); free(o.p); return true; }
 
@@ -623,10 +660,26 @@ NAT(co_step) {
   if (r < 0) { varr_push(&l->a, NUMV(2)); varr_push(&l->a, vm.exc); vm.exc = NIL; } else { varr_push(&l->a, NUMV(r)); varr_push(&l->a, out); }
   *res = OBJV(l); return true;
 }
+
+
 NAT(s_fork) {
   SAFE();
 #if !SOLAN_FORK
-  FAIL("هذه الدالة غير متاحة على هذا النظام (تتطلب fork): استخدم WSL أو Linux");
+  if (!callable(a[0])) FAIL("فرع يتطلب دالة");
+  char self[PATH_MAX]; if (!os_self_exe(self, sizeof self)) FAIL("تعذّر تحديد مسار المفسر");
+  int lfd = -1; unsigned short port = 0;
+  if (w_listen_local(&lfd, &port) < 0) FAIL("تعذّر إنشاء سوكت محلي للعامل");
+  char tf[PATH_MAX]; w_tmpname(tf, sizeof tf, "fr");
+  if (!w_freeze_file(tf, a[0])) { close(lfd); unlink(tf); FAIL("تعذّر تجميد الدالة للعملية الفرعية"); }
+  char portarg[16]; snprintf(portarg, sizeof portarg, "%u", port);
+  char *av[6] = {self, "--عامل_فرعي", tf, portarg, "0", NULL};
+  HANDLE ph = NULL; DWORD pid = 0;
+  if (w_spawn_argv(av, &ph, &pid) != 0) { close(lfd); unlink(tf); FAIL("تعذّر تشغيل العملية الفرعية"); }
+  int cfd = w_accept_local(lfd, 15000); close(lfd);
+  if (cfd < 0) { TerminateProcess(ph, 1); CloseHandle(ph); unlink(tf); FAIL("انتهت مهلة اتصال العملية الفرعية"); }
+  fd_setup(cfd); fflag[cfd] |= 8; w_track_proc(ph, pid);
+  Map *r = new_map(); dset(&r->d, KN("مقبض"), NUMV(cfd)); dset(&r->d, KN("pid"), NUMV(pid));
+  *res = OBJV(r); return true;
 #else
   if (!callable(a[0])) FAIL("فرع يتطلب دالة"); int p[2]; if (pipe(p) < 0) FAIL("تعذّر إنشاء أنبوب");
   if (p[0] >= MAXFD) { close(p[0]); close(p[1]); FAIL("عدد الاتصالات كبير جدا"); }
@@ -645,7 +698,21 @@ static void report_error(void);
 NAT(s_worker) {
   SAFE();
 #if !SOLAN_FORK
-  FAIL("هذه الدالة غير متاحة على هذا النظام (تتطلب fork): استخدم WSL أو Linux");
+  if (!callable(a[0])) FAIL("عامل يتطلب دالة");
+  char self[PATH_MAX]; if (!os_self_exe(self, sizeof self)) FAIL("تعذّر تحديد مسار المفسر");
+  int lfd = -1; unsigned short port = 0;
+  if (w_listen_local(&lfd, &port) < 0) FAIL("تعذّر إنشاء قناة العامل");
+  char tf[PATH_MAX]; w_tmpname(tf, sizeof tf, "wk");
+  if (!w_freeze_file(tf, a[0])) { close(lfd); unlink(tf); FAIL("تعذّر تجميد دالة العامل"); }
+  char portarg[16]; snprintf(portarg, sizeof portarg, "%u", port);
+  char *av[6] = {self, "--عامل_فرعي", tf, portarg, "1", NULL};
+  HANDLE ph = NULL; DWORD pid = 0;
+  if (w_spawn_argv(av, &ph, &pid) != 0) { close(lfd); unlink(tf); FAIL("تعذّر تشغيل عملية العامل"); }
+  int cfd = w_accept_local(lfd, 15000); close(lfd);
+  if (cfd < 0) { TerminateProcess(ph, 1); CloseHandle(ph); unlink(tf); FAIL("انتهت مهلة اتصال العامل"); }
+  fd_setup(cfd); fflag[cfd] |= 8; w_track_proc(ph, pid);
+  Map *r = new_map(); dset(&r->d, KN("مقبض"), NUMV(cfd)); dset(&r->d, KN("pid"), NUMV(pid));
+  *res = OBJV(r); return true;
 #else
   if (!callable(a[0])) FAIL("عامل يتطلب دالة"); int sp[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) < 0) FAIL("تعذّر إنشاء قناة");
@@ -705,7 +772,13 @@ NAT(s_symbols) {
 }
 NAT(s_waitpid) { NUMA(0);
 #if !SOLAN_FORK
-  FAIL("waitpid غير متاحة على هذا النظام");
+  DWORD pid = (DWORD)a[0].as.n;
+  HANDLE h = w_proc_by_pid(pid);
+  if (!h) { *res = NUMV(-1); return true; }
+  WaitForSingleObject(h, INFINITE);
+  DWORD code = 1; GetExitCodeProcess(h, &code);
+  w_untrack_pid(pid);
+  *res = NUMV((int)code); return true;
 #else
   int st = 0; pid_t r = waitpid((pid_t)a[0].as.n, &st, 0); *res = NUMV(r < 0 ? -1 : (WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st))); return true;
 #endif
@@ -716,6 +789,19 @@ static void defnat(Dict *d, const char *name, NativeFn fn, int mn, int mx) {
 }
 static Map *mkmod(const char *name) { Map *m = new_map(); m->module = true; dset(&vm.natmods, OBJV(normstr(name)), OBJV(m)); return m; }
 #define MF(m, name, fn, mn, mx) defnat(&(m)->d, name, fn, mn, mx)
+NAT(n_frompairs) {
+  if (!IS_T(a[0], O_LIST)) FAIL("من_ازواج تتطلب قائمة أزواج");
+  Map *out = new_map(); push(OBJV(out));
+  List *pairs = AS_LIST(a[0]);
+  for (int i = 0; i < pairs->a.n; i++) {
+    Value pv = pairs->a.v[i];
+    if (!IS_T(pv, O_LIST) || AS_LIST(pv)->a.n < 2) { vm.sp--; FAIL("من_ازواج: كل عنصر يجب أن يكون زوجا [مفتاح, قيمة]"); }
+    List *p = AS_LIST(pv);
+    dset(&out->d, p->a.v[0], p->a.v[1]);
+  }
+  vm.sp--; *res = OBJV(out); return true;
+}
+
 static void init_natives(void) {
   Dict *g = &vm.builtins;
   defnat(g, "اطبع", n_print, 0, -1); defnat(g, "اكتب", n_write, 0, -1); defnat(g, "ادخل", n_input, 0, 1);
@@ -723,7 +809,8 @@ static void init_natives(void) {
   defnat(g, "مدى", n_range, 1, 3); defnat(g, "_عدد_المدى", n_range_count, 3, 3); defnat(g, "تأكد", n_assert, 1, 2); defnat(g, "حرف", n_chr, 1, 1); defnat(g, "رمز", n_ord, 1, 1);
   defnat(g, "هل_فرع", n_isa, 2, 2); defnat(g, "هل_نص", n_is_str, 1, 1); defnat(g, "هل_رقم", n_is_num, 1, 1);
   defnat(g, "هل_قائمة", n_is_list, 1, 1); defnat(g, "هل_قاموس", n_is_map, 1, 1); defnat(g, "هل_عدم", n_is_nil, 1, 1);
-  defnat(g, "هل_دالة", n_is_fn, 1, 1); defnat(g, "نسق", n_format, 1, -1); defnat(g, "لون_الكود", n_hl_ansi, 1, 1); defnat(g, "كود_html", n_hl_html, 1, 1); defnat(g, "ارقام_عربية", n_digits_ar, 1, 1); defnat(g, "ارقام_لاتينية", n_digits_en, 1, 1); defnat(g, "ارقام_فارسية", n_digits_fa, 1, 1); defnat(g, "ارقام_الاخراج", n_digits_mode, 1, 1); defnat(g, "كوروتين", co_new, 1, -1); defnat(g, "استأنف", co_resume_n, 1, 2); defnat(g, "منتهي", co_done, 1, 1); defnat(g, "_استأنف", co_step, 1, 3); defnat(g, "_تعداد", n_enum, 1, 1); defnat(g, "لديه", n_has, 2, 2);
+  defnat(g, "اجمع_القمامة", n_gcrun, 0, 0); defnat(g, "عدد_الكائنات", n_gcnobj, 0, 0); defnat(g, "حد_القمامة", n_gcthresh, 0, 1);
+  defnat(g, "هل_دالة", n_is_fn, 1, 1); defnat(g, "نسق", n_format, 1, -1); defnat(g, "لون_الكود", n_hl_ansi, 1, 1); defnat(g, "كود_html", n_hl_html, 1, 1); defnat(g, "ارقام_عربية", n_digits_ar, 1, 1); defnat(g, "ارقام_لاتينية", n_digits_en, 1, 1); defnat(g, "ارقام_فارسية", n_digits_fa, 1, 1); defnat(g, "ارقام_الاخراج", n_digits_mode, 1, 1); defnat(g, "كوروتين", co_new, 1, -1); defnat(g, "استأنف", co_resume_n, 1, 2); defnat(g, "منتهي", co_done, 1, 1); defnat(g, "_استأنف", co_step, 1, 3); defnat(g, "_تعداد", n_enum, 1, 1); defnat(g, "لديه", n_has, 2, 2); defnat(g, "من_ازواج", n_frompairs, 1, 1); defnat(g, "يطبق", n_implements, 2, 2);
   dset(g, KN("النسخة"), mkstr(SOLAN_VERSION, (int)strlen(SOLAN_VERSION)));
 
 
@@ -800,9 +887,11 @@ static void init_natives(void) {
 #if SOLAN_FFI
   m = mkmod("ffi"); MF(m, "افتح", ffi_open, 0, 1); MF(m, "ربط", ffi_bind, 3, 3); MF(m, "ذاكرة", ffi_alloc, 1, 1); MF(m, "حرر", ffi_free, 1, 1);
   MF(m, "اقرأ_نص", ffi_read_str, 1, 2); MF(m, "اكتب_نص", ffi_write_str, 2, 2);
+  MF(m, "اقرأ_حقل", ffi_read_field, 3, 3); MF(m, "اكتب_حقل", ffi_write_field, 4, 4); MF(m, "حجم_حقل", ffi_field_size, 1, 1);
 #else
   m = mkmod("ffi"); MF(m, "افتح", ffi_na, 0, 1); MF(m, "ربط", ffi_na, 3, 3); MF(m, "ذاكرة", ffi_na, 1, 1); MF(m, "حرر", ffi_na, 1, 1);
   MF(m, "اقرأ_نص", ffi_na, 1, 2); MF(m, "اكتب_نص", ffi_na, 2, 2);
+  MF(m, "اقرأ_حقل", ffi_na, 3, 3); MF(m, "اكتب_حقل", ffi_na, 4, 4); MF(m, "حجم_حقل", ffi_na, 1, 1);
 #endif
   m = mkmod("ضغط"); MF(m, "gzip", z_gzip, 1, 1); MF(m, "gunzip", z_gunzip, 1, 1); MF(m, "zlib", z_zlib, 1, 1); MF(m, "فك", z_gunzip, 1, 1); MF(m, "فك_zlib", z_unzlib, 1, 1); MF(m, "خام", z_raw_deflate, 1, 1); MF(m, "فك_خام", z_raw_inflate, 1, 1);
   m = mkmod("قاعدة_سريعة"); MF(m, "افتح", kv_open, 1, 1); MF(m, "ضع", kv_put, 3, 3); MF(m, "احصل", kv_get, 2, 3); MF(m, "يوجد", kv_has, 2, 2); MF(m, "احذف", kv_del, 2, 2); MF(m, "زد", kv_incr, 2, 3); MF(m, "مفاتيح", kv_keys, 1, 1); MF(m, "عدد", kv_count, 1, 1); MF(m, "احفظ", kv_flush, 1, 1); MF(m, "اضغط", kv_compact_nat, 1, 1); MF(m, "اغلق", kv_close, 1, 1);

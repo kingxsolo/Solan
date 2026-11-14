@@ -73,6 +73,27 @@ static double jit_h_mod(double a, double b) {
 }
 static double jit_h_pow(double a, double b) { return sol_pow(a, b); }
 
+// مسند فحص النوع المدمج لمطابقة الأنماط (نفس منطق OP_TYPEIS في المفسّر) — يعيد 1/0
+static int jit_h_typeis(Value v, int op) {
+  switch (op) {
+    case 0: return IS_NUM(v);
+    case 1: return IS_NUM(v) && v.as.n == floor(v.as.n) && fabs(v.as.n) < 9007199254740992.0;
+    case 2: return IS_T(v, O_STR);
+    case 3: return v.t == V_BOOL;
+    case 4: return IS_T(v, O_LIST);
+    case 5: return IS_T(v, O_MAP);
+    case 6: return CALLABLE_OBJ(v);
+    case 7: return v.t == V_OBJ && v.as.o->t == O_INST;
+    case 8: return IS_T(v, O_CLS);
+    case 9: return IS_T(v, O_CORO);
+    default: return 0;
+  }
+}
+// نسخة استدعاء من JIT: تأخذ مؤشر المكدس مباشرة وتكتب النتيجة مكان القيمة
+static void jit_h_typeis_sp(Value *slot, int op) {
+  slot[0] = BOOLV(jit_h_typeis(slot[0], op) != 0);
+}
+
 
 
 
@@ -172,6 +193,9 @@ static int jc_effect(JC *c, JI *in, int *pop, int *push) {
     case OP_DUP2: *push = 2; return 1;
     case OP_POP: *pop = 1; return 1;
     case OP_SET_LOCAL: case OP_SET_GLOBAL: case OP_SET_UPV: case OP_NOT: case OP_NEG: case OP_JUMP: case OP_JIF: case OP_JIT: case OP_JNN: case OP_JNIL: case OP_LOOP: return 1;
+    case OP_TYPEIS: return 1; // استبدال موضعي: قيمة واحدة تبقى قيمة واحدة
+    case OP_INRANGE: *pop = 2; return 1; // يستهلك (أ، ب) ويكتب النتيجة مكان القيمة
+    case OP_IFACE: *pop = 1; return 1; // يسحب الصنف بعد التعليم
     case OP_GET_PROP: return 1;
     case OP_CHECK: return 1;
     case OP_GET_INDEX: case OP_EQ: case OP_GT: case OP_LT: case OP_GE: case OP_LE: case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_MOD: case OP_POW: case OP_IDIV:
@@ -924,6 +948,7 @@ static void jc_promote(JC *c) {
           break;
         }
         case OP_CHECK: if (in->a & TY_NUM) ty[d - 1] = 1; break;
+        case OP_TYPEIS: ty[d - 1] = 0; break; // النتيجة منطقية وليست رقمًا مروّجًا
         default: break;
       }
     }
@@ -1200,6 +1225,90 @@ static void jc_gen_body(JC *c) {
         jc_bind(c, lf);
         jx_mov_ri(x, RAX, 1); jx_mov_mr(x, R12, (d - 1) * 16 + 8, RAX); jc_settag(c, d - 1, V_BOOL);
         jc_bind(c, ld); c->sd[d - 1] = sd_mk(SK_MEM);
+        break;
+      }
+      case OP_TYPEIS: {
+        // فحص النوع المدمج: يبدل على وسم القيمة (V_NIL/V_BOOL/V_NUM/V_OBJ) ثم فحص مساعد عند الحاجة
+        jc_canon(c, 0, d); // تجسيد كل المواضع في الذاكرة لنستخدم سجلات XMM الخام بأمان
+        int b, dd; jc_mem_addr(c, d - 1, &b, &dd);
+        int top = in->ip[1]; // معامل فحص النوع (0..9)
+        int lnum = jc_new_label(c), lb = jc_new_label(c), lobj = jc_new_label(c), ldone = jc_new_label(c);
+        jx_mov32_rm(x, RAX, b, dd);
+        jx_cmp32_ri(x, RAX, V_NUM); jc_jcc(c, CC_E, lnum);
+        jx_cmp32_ri(x, RAX, V_BOOL); jc_jcc(c, CC_E, lb);
+        jx_cmp32_ri(x, RAX, V_OBJ); jc_jcc(c, CC_E, lobj);
+        jx_mov_ri(x, RAX, 0); // لا شيء أو غير ذلك: غير متحقق لكل الأنماط
+        jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone);
+        jc_bind(c, lb);
+        // القيمة منطقية: يتحقق فقط للنمط 3 (منطقي)
+        jx_mov_ri(x, RAX, top == 3); jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone);
+        jc_bind(c, lnum);
+        // القيمة رقم: يتحقق فقط لرقم (0) وعدد صحيح (1)
+        if (top == 0) { jx_mov_ri(x, RAX, 1); jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone); }
+        else if (top == 1) {
+          jx_movsd_rm(x, 0, b, dd + 8); jx_roundsd(x, 1, 0, 0x0A); jx_ucomisd(x, 0, 1); // v == أرضية(v)
+          jx_setcc(x, CC_E, RAX); jx_setcc(x, CC_NP, RCX); jx_and8_rr(x, RAX, RCX);
+          jx_mov_ri(x, RDX, 0x7FFFFFFFFFFFFFFFull); jx_movq_xr(x, 4, RDX); // قناع القيمة المطلقة
+          jx_movsd_rm(x, 3, b, dd + 8); jx_movaps(x, 3, 3); jx_andpd(x, 3, 4);
+          jx_mov_ri(x, RDX, 0x4340000000000000ull); jx_movq_xr(x, 2, RDX); // 2^53
+          jx_ucomisd(x, 3, 2); jx_setcc(x, CC_B, RCX); jx_and8_rr(x, RAX, RCX); // |v| < 2^53
+          jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone);
+        }
+        else { jx_mov_ri(x, RAX, 0); jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone); }
+        jc_bind(c, lobj);
+        // قيمة كائن: الأنماط القابلة للحسم من وسم الكائن تُقارن مباشرة
+        if (top == 2 || top == 4 || top == 5 || top == 7 || top == 8 || top == 9) {
+          int ot = top == 2 ? O_STR : top == 4 ? O_LIST : top == 5 ? O_MAP : top == 7 ? O_INST : top == 8 ? O_CLS : O_CORO;
+          jx_mov_rm(x, RAX, b, dd + 8); jx_cmp32_mi(x, RAX, (int)offsetof(Obj, t), ot);
+          jx_setcc(x, CC_E, RAX); jc_store_bool_eax(c, d - 1); jc_jmp(c, ldone);
+        }
+        // الأنماط 0/1/3 مستحيلة على كائن؛ 6 قابل للاستدعاء يحتاج فحص أنواع متعددة عبر مساعد
+        if (top == 6) {
+          jc_flush_vars(c);
+#if JX_ARM
+          jx_lea(x, RAX, R12, -1, 0, (d - 1) * 16); // الوسيطة 0: موضع القيمة
+          jx_mov_ri(x, RCX, (uint64_t)top);          // الوسيطة 1: النمط
+#elif JX_WIN
+          jx_lea(x, RCX, R12, -1, 0, (d - 1) * 16);
+          jx_mov_ri(x, RDX, (uint64_t)top);
+#else
+          jx_lea(x, RDI, R12, -1, 0, (d - 1) * 16);
+          jx_mov_ri(x, RSI, (uint64_t)top);
+#endif
+          jc_call_helper(c, (void *)jit_h_typeis_sp); // يكتب القيمة المنطقية كاملة (وسم+قيمة) في الموضع
+          c->sd[d - 1] = sd_mk(SK_MEM);
+        } else { jx_mov_ri(x, RAX, 0); jc_store_bool_eax(c, d - 1); }
+        jc_bind(c, ldone);
+        break;
+      }
+      case OP_INRANGE: {
+        // المدى: النتيجة (صواب/خطأ) تُكتب مكان القيمة، والقفز يتولاه OP_JIT التالي
+        if (d < 3) { c->failed = 1; c->why = "inrange"; break; }
+        jc_canon(c, 0, d);
+        jc_need_num(c, i, d, d - 3); jc_need_num(c, i, d, d - 2); jc_need_num(c, i, d, d - 1);
+        int lfail = jc_new_label(c), ldone = jc_new_label(c);
+        jc_load_num(c, d - 3, 3);          // v
+        int rb = jc_reg_for(c, d - 1, 1);  // ب
+        jx_ucomisd(x, 3, rb);
+        jc_jcc(c, CC_A, lfail); jc_jcc(c, CC_P, lfail); // v > ب أو غير مرتب → فشل
+        int ra = jc_reg_for(c, d - 2, 2);  // أ
+        jx_ucomisd(x, 3, ra);
+        jc_jcc(c, CC_B, lfail); jc_jcc(c, CC_P, lfail); // v < أ أو غير مرتب → فشل
+        jx_mov_ri(x, RAX, 1); jc_store_bool_eax(c, d - 3);
+        jc_jmp(c, ldone);
+        jc_bind(c, lfail);
+        jx_mov_ri(x, RAX, 0); jc_store_bool_eax(c, d - 3);
+        jc_bind(c, ldone);
+        break;
+      }
+      case OP_IFACE: {
+        // علّم الصنف كواجهة: بايت is_iface = 1 (لا يظهر عادةً في مناطق الـJIT الساخنة)
+        jc_mat(c, d - 1);
+        int b, dd; jc_mem_addr(c, d - 1, &b, &dd);
+        int dl = jc_deopt(c, i, d);
+        jx_cmp32_mi(x, b, dd, V_OBJ); jc_jcc(c, CC_NE, dl);
+        jx_mov_rm(x, RAX, b, dd + 8); jx_cmp32_mi(x, RAX, (int)offsetof(Obj, t), O_CLS); jc_jcc(c, CC_NE, dl);
+        jx_mov_ri(x, RAX, 1); jx_mov8_mr(x, RAX, (int)offsetof(Class, is_iface), RAX);
         break;
       }
       case OP_JUMP: case OP_LOOP: jc_canon(c, 0, d); jc_jmp(c, jc_jump_label(c, in, d, 0)); break;

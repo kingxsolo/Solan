@@ -93,7 +93,10 @@
   X(OP_Q_LL_SUB) \
   X(OP_Q_LL_MUL) \
   X(OP_Q_SETPOP) \
-  X(OP_JMOVE)
+  X(OP_JMOVE) \
+  X(OP_TYPEIS) \
+  X(OP_INRANGE) \
+  X(OP_IFACE)
 #define X_OPENUM(o) o,
 #define X_LBL(o) &&L_##o,
 typedef enum { OPLIST(X_OPENUM) OP__COUNT } Op;
@@ -114,6 +117,8 @@ typedef struct { const char *src, *cur; int line; } Scanner;
 typedef struct {
   Token cur, prev; Scanner sc; const char *file; bool quiet; jmp_buf jb;
   Str *gconst[256]; int ngconst; Str *gtn[256]; uint16_t gtm[256]; List *gti[256]; int ngt; char errmsg[400]; char errtext[300]; int errline; int last_add_pos; void *last_add_c; int rec; Str *soft[256]; int nsoft;
+  bool gsplit_reserved; int gsplit_rem; // تقسيم '>>' أو '>=' المدمج عند إغلاق الأنواع العامة المتداخلة
+  Str *gwarn_names[256]; int gwarn_lines[256]; bool gwarn_used[256]; int ngwarn; // تتبع المتغيرات العامة غير المستخدمة
 } Parser;
 static Parser P;
 
@@ -178,7 +183,7 @@ static void init_keywords(void) {
   }
   static const struct { int id; const char *words; } ctx[] = {
     {1, "حالة|عندما|حين|لو_كان"}, {2, "افتراضي|غير_ذلك_افتراضي|سوى"}, {3, "ساكن|ساكنة|استاتيكي"},
-    {4, "خاصية|صفة|احصل"}, {5, "تعداد|قائمة_ثابتة|تعداد_ثابت"}, {6, "من|من_مكتبة"}, {0, NULL}};
+    {4, "خاصية|صفة|احصل"}, {5, "تعداد|قائمة_ثابتة|تعداد_ثابت"}, {6, "من|من_مكتبة"}, {7, "واجهة|عقد|واجهة_برمجية"}, {0, NULL}};
   for (int i = 0; ctx[i].words; i++) {
     char buf[256]; snprintf(buf, sizeof buf, "%s", ctx[i].words);
     for (char *w = strtok(buf, "|"); w; w = strtok(NULL, "|")) dset(&vm.ctxw, OBJV(normstr(w)), NUMV(ctx[i].id));
@@ -201,6 +206,7 @@ static int op_operand_len(const Fun *f, const uint8_t *ip) {
     case OP_JUMP: case OP_JIF: case OP_JIT: case OP_JNN: case OP_LOOP: case OP_CLASS: case OP_METHOD: case OP_LIST: case OP_MAP:
     case OP_TRY: case OP_IMPORT: case OP_STATIC: case OP_LINE: case OP_JNIL: case OP_INVOKEV: return 2;
     case OP_CHECK: return 4;
+    case OP_TYPEIS: case OP_IFACE: return 1;
     case OP_JNE_EMPTY: case OP_INVOKE: case OP_SUPER_INVOKE: return 3;
     case OP_FOREACH: return 4;
     case OP_RFOREP: return 3;
