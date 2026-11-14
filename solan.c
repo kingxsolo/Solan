@@ -18,10 +18,18 @@
 #include "src/vm/stdlib_embed.inc"
 #include "src/vm/modules.inc"
 #include "src/vm/methods.inc"
+/*
+  ملفات العمليات الفرعية والعمال على ويندوز (نظام.فرع، نظام.عامل، نظام.عملية).
+  على ويندوز (SOLAN_FORK=0) تُضمَّن وتُترجم؛ على لينكس وماك (SOLAN_FORK=1)
+  تُستبدل بمسار fork/pipe الأصلي الموجود في regex.inc — فلا تُضمَّن إطلاقاً
+  لأن محتواها واجهات ويندوز حصراً (SECURITY_ATTRIBUTES، CreateProcessW، ...).
+*/
+#if !SOLAN_FORK
 #include "src/vm/worker_value.inc"
 #include "src/vm/worker_net.inc"
 #include "src/vm/worker_main.inc"
 #include "src/vm/worker_entry.inc"
+#endif // !SOLAN_FORK
 #include "src/runtime/lineedit.inc"
 #include "src/lib/natives_core.inc"
 #include "src/lib/json.inc"

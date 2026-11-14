@@ -181,7 +181,8 @@ int main(int argc, char **argv) {
     Fun *cf = compile(cs, av[1], false); free(cs); if (cf) { printf("سليم: %s\n", av[1]); return 0; } return 65;
   }
   if (rest >= 2 && !strcmp(av[0], "-e")) return run_source(av[1], "<-e>");
-  // وضع العامل الفرعي: solan --عامل_فرعي <ملف_تجميد> <منفذ> <وضع>
+  // وضع العامل الفرعي وناقل العملية: ويندوز حصراً (على لينكس/ماك العمال عبر fork)
+#if !SOLAN_FORK
   if (rest >= 3 && (!strcmp(av[0], "--عامل_فرعي") || !strcmp(av[0], "--worker-sub"))) {
     int port = atoi(av[2]); int mode = rest >= 4 ? atoi(av[3]) : 0;
     return worker_entry(av[1], port, mode);
@@ -190,6 +191,7 @@ int main(int argc, char **argv) {
   if (rest >= 5 && (!strcmp(av[0], "--ناقل_عملية") || !strcmp(av[0], "--proc-relay"))) {
     return proc_relay_main(av[1], (unsigned short)atoi(av[2]), (unsigned short)atoi(av[3]), (unsigned short)atoi(av[4]));
   }
+#endif // !SOLAN_FORK
   if (rest < 1) { repl(); return 0; }
   size_t n; char *src = read_file(av[0], &n);
   if (!src) { fprintf(stderr, "سولان: تعذّر فتح الملف '%s'\n", av[0]); return 66; }
