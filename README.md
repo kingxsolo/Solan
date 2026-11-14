@@ -41,16 +41,16 @@
 
 اختر نسختك وانقر الزر — كل زر ينزّل **أحدث إصدار مباشرة** (روابط ثابتة لا تتغير مع الإصدارات الجديدة):
 
-| منصتك | أزرار التنزيل |
+| منصتك | التنزيل أو أمر التثبيت |
 |---|---|
-| 🪟 **ويندوز 64-بت** | [![Windows 64-bit installer](https://img.shields.io/badge/Windows_64--bit-Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x64.exe) [![Windows 64-bit portable zip](https://img.shields.io/badge/Windows_64--bit-Portable_ZIP-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x64.zip) |
-| 🪟 **ويندوز 32-بت** | [![Windows 32-bit installer](https://img.shields.io/badge/Windows_32--bit-Installer-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x86.exe) [![Windows 32-bit portable zip](https://img.shields.io/badge/Windows_32--bit-Portable_ZIP-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-x86.zip) |
-| 🪟 **ويندوز ARM64** | [![Windows ARM64 installer](https://img.shields.io/badge/Windows_ARM64-Installer-0E7A8D?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-arm64.exe) [![Windows ARM64 portable zip](https://img.shields.io/badge/Windows_ARM64-Portable_ZIP-0E7A8D?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-windows-arm64.zip) |
-| 🍎 **ماك** (Intel + Apple Silicon) | [![macOS installer pkg](https://img.shields.io/badge/macOS-Installer_PKG-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos.pkg) [![macOS portable tar.gz](https://img.shields.io/badge/macOS-Portable_tar.gz-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos-universal.tar.gz) |
-| 🐧 **لينكس 64-بت** (أي توزيعة) | [![Debian package](https://img.shields.io/badge/Linux_64--bit-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_amd64.deb) [![RPM package](https://img.shields.io/badge/Linux_64--bit-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.x86_64.rpm) [![Linux portable tar.gz](https://img.shields.io/badge/Linux_64--bit-Portable_tar.gz-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-x64.tar.gz) |
-| 🐧 **لينكس ARM64** (راسبيري باي 5، خوادم ARM) | [![Debian ARM64 package](https://img.shields.io/badge/Linux_ARM64-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_arm64.deb) [![RPM ARM64 package](https://img.shields.io/badge/Linux_ARM64-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.aarch64.rpm) [![Linux ARM64 portable tar.gz](https://img.shields.io/badge/Linux_ARM64-Portable_tar.gz-2EA043?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-linux-arm64.tar.gz) |
+| 🪟 **ويندوز 64-بت** | [![Windows 64-bit installer](https://img.shields.io/badge/Windows_64--bit-Installer-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x64.exe) — شغّل `Solan-Setup-x64.exe` |
+| 🪟 **ويندوز 32-بت** | [![Windows 32-bit installer](https://img.shields.io/badge/Windows_32--bit-Installer-5C9AD6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-x86.exe) — شغّل `Solan-Setup-x86.exe` |
+| 🪟 **ويندوز ARM64** | [![Windows ARM64 installer](https://img.shields.io/badge/Windows_ARM64-Installer-0E7A8D?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-Setup-arm64.exe) — شغّل `Solan-Setup-arm64.exe` |
+| 🐧 **لينكس (أي توزيعة)** | `curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-release.sh \| sh` — يكتشف نظامك ويثبّت (deb أو rpm أو استخراج مباشر) |
+| 🐧 **لينكس حزمة يدوية** | [![Debian package](https://img.shields.io/badge/Linux_64--bit-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_amd64.deb) [![RPM package](https://img.shields.io/badge/Linux_64--bit-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.x86_64.rpm) [![Debian ARM64](https://img.shields.io/badge/Linux_ARM64-DEB-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan_arm64.deb) [![RPM ARM64](https://img.shields.io/badge/Linux_ARM64-RPM-294172?style=for-the-badge&logo=fedora&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/solan.aarch64.rpm) |
+| 🍎 **ماك** (Intel + Apple Silicon) | [![macOS installer pkg](https://img.shields.io/badge/macOS-Installer_PKG-black?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kingxsolo/Solan/releases/latest/download/Solan-macos.pkg) — شغّل `Solan-macos.pkg`، أو نفس أمر التثبيت أعلاه |
 
-المُثبِّت بواجهة عربية لكل معماريات ويندوز (PATH + ربط ملفات `.سو` محددة تلقائياً + إزالة تثبيت)، وحزم لينكس **ثابتة بلا أي مكتبات**، و**حزمة ماك pkg مثبّت جاهز**.
+كل الملفات الجاهزة **مثبّتات وحزم نظام** — لا توجد نسخ أرشيفية (zip/tar.gz) في الإصدارات: لينكس وماك يُثبَّتان بأمر التثبيت أعلاه أو بحزم deb/rpm/pkg الأصلية. المُثبِّت بواجهة عربية لكل معماريات ويندوز (PATH + ربط ملفات `.سو` محددة تلقائياً + إزالة تثبيت)، وحزم لينكس **ثابتة بلا أي مكتبات**، و**حزمة ماك pkg مثبّت جاهز**.
 
 **لينكس وماك بأمر واحد** — يكتشف نظامك ويثبّت:
 
@@ -81,18 +81,7 @@ git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh
 
 **إزالة التثبيت**: الإعدادات ← التطبيقات ← التطبيقات المثبتة ← سولان ← إزالة.
 
-#### ب) نسخة محمولة (بلا تثبيت)
-
-1. أنزّل `Solan-1.3.5-windows-x64.zip` (أو `-x86.zip` لويندوز 32-بت، أو `-arm64.zip` لأجهزة ARM).
-2. فك الضغط في أي مجلد — مثلاً `C:\solan`.
-3. شغّل `solan.exe` من الطرفية، أو أضف المجلد إلى `PATH` يدوياً:
-
-```bat
-:: للمستخدم الحالي فقط (بلا صلاحيات مدير)
-setx PATH "%PATH%;C:\solan"
-```
-
-#### ج) البناء الأصلي من المصدر (بلا MSYS2 ولا WSL)
+#### ب) البناء الأصلي من المصدر (بلا MSYS2 ولا WSL)
 
 ```powershell
 git clone https://github.com/kingxsolo/Solan
@@ -116,7 +105,7 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 
 - **`https` و`wss`**: `شبكة.جلب` على HTTPS تعمل **بلا أي إضافات** عبر عميل TLS خالص مضمّن (TLS 1.3 وTLS 1.2 مع تحقق كامل للشهادات)، وكذلك `wss` و`جلب_متدفق` والبروكسي — كل شيء مدمج. خادم TLS (خيارات `شهادة`/`مفتاح`) غير مدعوم. عند غياب شهادات النظام تُستعمل حزمة شهادات CA احتياطية **مدمجة** فيعمل HTTPS فوراً.
 - **مسارات الحزم الطويلة**: إن ظهرت مشاكل مع مسارات المكتبات، فعّل «Long Paths» أو اجعل `SOLAN_HOME` قصيراً (مثل `C:\so`).
-- **32-بت وARM64**: نسخة `-x86.zip` مفسَّرة كامل الوظائف (الـJIT للـ64-بت فقط)، ونسخة `-arm64.zip` لمُثبِّتها `Setup-arm64.exe` تعمل على أجهزة ويندوز على ARM (سيرفيس، لابتوبات ARM).
+- **32-بت وARM64**: المُثبِّت `Setup-x86.exe` للمعمارية 32-بت يعطي مفسَّراً كامل الوظائف (الـJIT للـ64-بت فقط)، و`Setup-arm64.exe` يعمل على أجهزة ويندوز على ARM (سيرفيس، لابتوبات ARM) والـJIT مفعّل عليه.
 - **الأداء**: نسخة ويندوز الأصلية مربوطة ثابتاً بـ `-O3` وLTO ومستهدفة `x86-64-v2`، والـJIT مفعّل — انظر القسم 14 للأرقام المقاسة.
 
 ### لينكس
@@ -127,7 +116,7 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-release.sh | sh
 ```
 
-أو بعد تنزيل المستودع: `sh install-release.sh`. يثبّت في `/usr/local/bin` إن أمكن، وإلا `~/.local/bin` (بلا صلاحيات مدير)، ويخبرك إن احتاج `PATH`. الملف الثابت (musl static) يعمل على **أي توزيعة** — أوبونتو، دبيان، فيدورا، آرش، ألپاين — بلا أي مكتبات.
+أمر واحد يكفي لأي توزيعة: السكربت يكتشف نظامك — على أوبونتو/ديبيان ينزّل `deb` ويثبّته بـ`apt`، وعلى فيدورا/ريد هات/سوزي ينزّل `rpm` ويثبّته بـ`dnf`/`zypper`، وعلى أي توزيعة أخرى (ألپاين، آرش...) يستخرج الملف التنفيذي الثابت من حزمة `deb` ويثبّته في `/usr/local/bin` أو `~/.local/bin` (بلا صلاحيات مدير). الملف الثابت (musl static) يعمل على **أي توزيعة** — بلا أي مكتبات.
 
 #### ب) حزمة أصلية (deb / rpm)
 
@@ -148,18 +137,7 @@ sudo dnf install ./Solan-1.3.5-1.aarch64.rpm
 sudo zypper install ./Solan-1.3.5-1.x86_64.rpm
 ```
 
-#### ج) الحزمة الثابتة يدوياً
-
-```sh
-tar xzf Solan-1.3.5-linux-x64.tar.gz
-sudo install -m755 Solan-1.3.5-linux-x64/solan /usr/local/bin/
-
-# أو بلا صلاحيات مدير:
-mkdir -p ~/.local/bin && install -m755 Solan-1.3.5-linux-x64/solan ~/.local/bin/
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile && . ~/.profile
-```
-
-#### د) البناء من المصدر
+#### ج) البناء من المصدر
 
 ```sh
 git clone https://github.com/kingxsolo/Solan && cd Solan
@@ -171,7 +149,7 @@ sh install.sh
 #### ملاحظات لينكس
 
 - **`https` و`wss`**: `شبكة.جلب` على HTTPS تعمل **بلا أي إضافات** عبر عميل TLS خالص مضمّن، وكذلك `wss` و`جلب_متدفق` والبروكسي — كل شيء مدمج. خادم TLS (خيارات `شهادة`/`مفتاح`) غير مدعوم.
-- **ARM64**: حزم جاهزة كاملة — `Solan-1.3.5-linux-arm64.tar.gz` الثابتة بلا أي مكتبات، وحزم أصلية `solan_1.3.5_arm64.deb` و`Solan-1.3.5-1.aarch64.rpm` للتثبيت بالنظام، والـJIT مفعّل عليها كلها.
+- **ARM64**: حزم جاهزة كاملة — `solan_1.3.5_arm64.deb` و`Solan-1.3.5-1.aarch64.rpm` للتثبيت بالنظام (راسبيري باي 5، خوادم ARM)، وأمر التثبيت أعلاه يتعرف عليها تلقائياً، والـJIT مفعّل عليها كلها.
 
 ### ماك (macOS)
 
@@ -186,19 +164,7 @@ sh install.sh
    - أو: إعدادات النظام ← الخصوصية والأمان ← «تم منع استخدام…» ← **فتح على أي حال**.
    - أو من الطرفية قبل الفتح: `xattr -d com.apple.quarantine Solan-1.3.5-macos.pkg`
 
-#### ب) الحزمة المحمولة
-
-```sh
-tar xzf Solan-1.3.5-macos-universal.tar.gz
-sudo install -m755 Solan-1.3.5-macos/solan /usr/local/bin/
-
-# أو بلا صلاحيات مدير:
-mkdir -p ~/.local/bin && install -m755 Solan-1.3.5-macos/solan ~/.local/bin/
-```
-
-إن اشتكى الماك من الملف المنزّل: `xattr -d com.apple.quarantine solan` (أو على المجلد كاملاً).
-
-#### ج) البناء من المصدر
+#### ب) البناء من المصدر
 
 ```sh
 git clone https://github.com/kingxsolo/Solan && cd Solan
@@ -240,15 +206,17 @@ sh install.sh
 
 ### جدول الدعم: البيئات والمعماريات
 
-| البيئة | المعمارية | ملف جاهز؟ | JIT | المفسّر |
+| البيئة | المعمارية | التثبيت | JIT | المفسّر |
 |---|---|---|---|---|
-| ويندوز 10/11 | x64 (64-بت) | Setup.exe + zip | ✓ مفعّل | — |
-| ويندوز | x86 (32-بت) | zip | ✗ | ✓ كامل |
-| لينكس | x86-64 | tar.gz ثابت + deb + rpm | ✓ مفعّل | — |
-| لينكس | ARM64 | tar.gz ثابت | ✓ مفعّل | — |
+| ويندوز 10/11 | x64 (64-بت) | Setup.exe | ✓ مفعّل | — |
+| ويندوز | x86 (32-بت) | Setup.exe | ✗ | ✓ كامل |
+| ويندوز على ARM | ARM64 | Setup.exe | ✓ مفعّل | — |
+| لينكس | x86-64 | deb + rpm أو أمر التثبيت | ✓ مفعّل | — |
+| لينكس | ARM64 | deb + rpm أو أمر التثبيت | ✓ مفعّل | — |
+| لينكس (بلا مدير حزم مدعوم) | x86-64 / ARM64 | أمر التثبيت (استخراج مباشر) | ✓ مفعّل | — |
 | لينكس | 32-بت | من المصدر | ✗ | ✓ كامل |
-| ماك | Intel | pkg + tar.gz | ✓ مفعّل | — |
-| ماك | Apple Silicon (M1–M4) | pkg + tar.gz | ✓ مفعّل | — |
+| ماك | Intel | pkg أو أمر التثبيت | ✓ مفعّل | — |
+| ماك | Apple Silicon (M1–M4) | pkg أو أمر التثبيت | ✓ مفعّل | — |
 | ترمكس (أندرويد) | ARM | من المصدر | ✗ | ✓ كامل |
 | BSD | x86-64 | من المصدر | ✗ | ✓ كامل |
 
@@ -324,7 +292,6 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
 | البيئة | الطريقة |
 |---|---|
 | ويندوز (Setup.exe) | الإعدادات ← التطبيقات ← سولان ← إزالة |
-| ويندوز (محمول) | احذف المجلد واحذف مدخله من `PATH` |
 | ويندوز (install.ps1) | احذف `%LOCALAPPDATA%\solan` واحذف مدخله من `PATH` |
 | لينكس (deb) | `sudo apt remove solan` |
 | لينكس (rpm) | `sudo dnf remove solan` |
@@ -2630,6 +2597,15 @@ powershell -ExecutionPolicy Bypass -File pc\build-pc.ps1 -Installer   # بناء
 | **إصلاح pbkdf2_sha256** | الوسيط الرابع (طول المفتاح) كان يُقرأ خطأً فأعطى ناتجاً خاطئاً؛ الآن يقبل رقماً أو نصاً. النتائج مطابقة لمرجع Node.js `crypto.pbkdf2Sync` |
 | **تسريع pbkdf2_sha256** | وسطية HMAC-SHA256 ثابتة تُبنى مرة واحدة: كل تكرار يكلف كتلتَي SHA-256 بدل حتى 4 كتل وتخصيصات لكل تكرار — أسرع عدة مرات |
 | **حقول ffi** | `اقرأ_حقل(مؤشر, إزاحة, نوع)` · `اكتب_حقل(مؤشر, إزاحة, نوع, قيمة)` · `حجم_حقل(نوع)` بأنواع `i8 u8 i16 u16 i32 u32 i64 f32 f64` — قراءة هياكل C بلا فك بايتات يدوي (انظر 11.1) |
+
+#### التوزيع والتثبيت: مثبّتات فقط — لا حزم أرشيفية
+
+| البند | التفصيل |
+|---|---|
+| **إزالة النسخ الأرشيفية من الإصدارات** | لم تعد تُنشر نسخ zip (ويندوز) ولا tar.gz (لينكس/ماك) في صفحة Releases — كل منصة لها **برنامج تثبيت** أو **حزمة نظام**: ويندوز `Setup.exe` للمعماريات الثلاث، لينكس `deb`/`rpm`، ماك `pkg` |
+| **أمر تثبيت الخوادم (`install-release.sh`)** | أُعيد بناؤه: يكتشف النظام ومدير الحزم وينزّل الحزمة الأصلية ويُثبّتها — `apt` على دبيان/أوبونتو، `dnf`/`yum`/`zypper` على فيدورا/ريد هات/سوزي، `installer` على ماك؛ وعلى الأنظمة **بلا مدير حزم** (ألپاين، آرش...) يستخرج الملف التنفيذي الثابت من حزمة deb ويثبّته يدوياً (`dpkg-deb -x` أو فك `ar` + `tar` بأدوات النظام نفسها) |
+| **سير الإصدار (release.yml)** | حزم tar.gz للينكس أصبحت أرتيفكت نقل داخلي فقط (لمهمة بناء deb/rpm) ولا تُنشر؛ النشر 9 ملفات: 3 مثبّتات ويندوز + 2 deb + 2 rpm + pkg ماك (+ 9 أسماء ثابتة للروابط المباشرة) |
+| **روابط التنزيل في README** | جدول الأزرار يعرض المثبّتات وأمر التثبيت حصراً؛ حذف أقسام «النسخة المحمولة» من ويندوز ولينكس وماك وإعادة ترقيم بدائل البناء من المصدر |
 
 #### الطريقة القديمة → الطريقة الجديدة
 

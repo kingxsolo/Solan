@@ -1,9 +1,9 @@
-# =====================================================================
+﻿# =====================================================================
 #  سولان — بناء واختبار وإصدار على كل المنصات
 #  - كل دفع: يبني ويختبر (ويندوز 64+32، لينكس ثابت، ماك يونيفرسال)
 #  - وسم v* : يبني المُثبِّتات الأصلية وينشر إصداراً بكل الملفات
-#  الحزم الناتجة: Setup.exe (ويندوز) + zip 64/32 + tar.gz لينكس ثابت
-#  + deb + rpm + pkg ماك + tar.gz ماك — كلها بلا أي متطلبات خارجية
+#  الحزم الناتجة: مثبّتات فقط — Setup.exe لويندوز (x64/x86/ARM64)
+#  + deb + rpm للينكس + pkg ماك — بلا أي حزم أرشيفية (zip/tar.gz)
 #  + نسخ بأسماء ثابتة (بلا رقم إصدار) لروابط التنزيل المباشرة في README
 # =====================================================================
 name: بناء-وإصدار
@@ -72,7 +72,7 @@ jobs:
       - name: استخراج رقم الإصدار
         shell: pwsh
         run: |
-          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.2' }
+          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.5' }
           "VER=$ver" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "VER=$ver"
 
@@ -124,14 +124,6 @@ jobs:
         shell: msys2 {0}
         run: SOLAN_JIT_TRACE=1 ./solan.exe pc/اختبار_JIT.سو 2>&1 | grep "جُمّعت حلقة"
 
-      - name: حزمة محمولة
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path حزمة | Out-Null
-          Copy-Item solan.exe حزمة/
-          Copy-Item README.md, LICENSE حزمة/
-          Compress-Archive -Path حزمة/* -DestinationPath "Solan-$env:VER-windows-${{ matrix.arch }}.zip" -Force
-
       # مُثبِّت عربي لكل معمارية — نفس installer.iss مع /DArch
       - name: المُثبِّت العربي Setup.exe (${{ matrix.arch }})
         shell: pwsh
@@ -148,10 +140,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
-          path: |
-            Solan-*-windows-*.zip
-            dist/Solan-*-Setup-*.exe
-          if-no-files-found: warn
+          path: dist/Solan-*-Setup-*.exe
+          if-no-files-found: error
 
   # ------------------------------------------------------------------
   #  لينكس: ملف تنفيذي ثابت (musl) يعمل على أي توزيعة بلا مكتبات
@@ -170,7 +160,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.2" ;;
+            *)  VER="1.3.5" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -188,10 +178,11 @@ jobs:
       - name: إثبات التجميع (تتبع)
         run: SOLAN_JIT_TRACE=1 ./solan pc/اختبار_JIT.سو 2>&1 | grep "جُمّعت حلقة"
 
-      - name: حزمة محمولة
+      # حزمة النقل الداخلية: تُنزَّل من مهمة بناء deb/rpm فقط — لا تُنشر في الإصدار
+      - name: حزمة النقل الداخلية
         run: |
           mkdir -p "حزمة/Solan-$VER-linux-x64"
-          cp solan README.md LICENSE "حزمة/Solan-$VER-linux-x64/"
+          cp solan LICENSE "حزمة/Solan-$VER-linux-x64/"
           tar czf "Solan-$VER-linux-x64.tar.gz" -C حزمة "Solan-$VER-linux-x64"
 
       - name: رفع المخرجات
@@ -218,7 +209,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.2" ;;
+            *)  VER="1.3.5" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -236,11 +227,12 @@ jobs:
       - name: إثبات تجميع ARM64 (تتبع — يفشل إن صمت الـJIT بعد أي خلل)
         run: SOLAN_JIT_TRACE=1 qemu-aarch64-static ./solan-arm64 pc/اختبار_JIT.سو 2>&1 | grep "جُمّعت حلقة"
 
-      - name: حزمة محمولة
+      # حزمة النقل الداخلية: تُنزَّل من مهمة بناء deb/rpm فقط — لا تُنشر في الإصدار
+      - name: حزمة النقل الداخلية
         run: |
           mkdir -p "حزمة/Solan-$VER-linux-arm64"
           cp solan-arm64 "حزمة/Solan-$VER-linux-arm64/solan"
-          cp README.md LICENSE "حزمة/Solan-$VER-linux-arm64/"
+          cp LICENSE "حزمة/Solan-$VER-linux-arm64/"
           tar czf "Solan-$VER-linux-arm64.tar.gz" -C حزمة "Solan-$VER-linux-arm64"
 
       - name: رفع المخرجات
@@ -355,7 +347,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.2" ;;
+            *)  VER="1.3.5" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -389,12 +381,8 @@ jobs:
             echo "Rosetta غير متوفرة على هذا العدّاء — تخطي اختبار شريحة Intel"
           fi
 
-      - name: حزمة محمولة
-        run: |
-          mkdir -p "حزمة/Solan-$VER-macos"
-          cp solan README.md LICENSE "حزمة/Solan-$VER-macos/"
-          tar czf "Solan-$VER-macos-universal.tar.gz" -C حزمة "Solan-$VER-macos"
-
+      # ملاحظة: حزمة tar.gz هنا أرتيفكت داخلي فقط — ماك يثبّت بـpkg، والخوادم
+      # تستخرج الملف التنفيذي بأمر التثبيت (install-release.sh)
       - name: المُثبِّت pkg
         run: |
           mkdir -p pkgroot/usr/local/bin
@@ -412,9 +400,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: |
-            Solan-*-macos-universal.tar.gz
-            Solan-*-macos.pkg
+          path: Solan-*-macos.pkg
+          if-no-files-found: error
 
   # ------------------------------------------------------------------
   #  النشر: عند وسم v* فقط — يجمع كل المخرجات وينشر الإصدار
@@ -441,17 +428,11 @@ jobs:
           cp Solan-*-Setup-x64.exe          Solan-Setup-x64.exe
           cp Solan-*-Setup-x86.exe          Solan-Setup-x86.exe
           cp Solan-*-Setup-arm64.exe        Solan-Setup-arm64.exe
-          cp Solan-*-windows-x64.zip        Solan-windows-x64.zip
-          cp Solan-*-windows-x86.zip        Solan-windows-x86.zip
-          cp Solan-*-windows-arm64.zip      Solan-windows-arm64.zip
-          cp Solan-*-linux-x64.tar.gz       Solan-linux-x64.tar.gz
-          cp Solan-*-linux-arm64.tar.gz     Solan-linux-arm64.tar.gz
           cp solan_*_amd64.deb              solan_amd64.deb
           cp solan_*_arm64.deb              solan_arm64.deb
           cp solan-*x86_64.rpm              solan.x86_64.rpm
           cp solan-*aarch64.rpm             solan.aarch64.rpm
           cp Solan-*-macos.pkg              Solan-macos.pkg
-          cp Solan-*-macos-universal.tar.gz Solan-macos-universal.tar.gz
           ls -1
 
       - name: ملاحظات الإصدار
@@ -464,22 +445,16 @@ jobs:
           | ويندوز 64-بت | `Solan-*-Setup-x64.exe` | شغّله واتبع الخطوات (واجهة عربية: PATH + ربط الملفات محددة تلقائياً + إزالة تثبيت) |
           | ويندوز 32-بت | `Solan-*-Setup-x86.exe` | نفس المُثبِّت للمعمارية 32-بت |
           | ويندوز ARM64 | `Solan-*-Setup-arm64.exe` | نفس المُثبِّت لأجهزة ARM (سيرفيس، لابتوبات ARM) |
-          | ويندوز (بدون تثبيت) | `Solan-*-windows-x64.zip` / `x86.zip` / `arm64.zip` | فك الضغط وشغّل `solan.exe` |
-          | لينكس (أي توزيعة) | `Solan-*-linux-x64.tar.gz` | `tar xzf` ثم انسخ `solan` إلى `~/.local/bin` — **ثابت، بلا أي مكتبات** |
-          | لينكس ARM64 (راسبيري باي 5، خوادم ARM) | `Solan-*-linux-arm64.tar.gz` | `tar xzf` ثم انسخ `solan` — **ثابت، بلا أي مكتبات** |
-          | أوبونتو/ديبيان 64-بت | `solan_*_amd64.deb` | `sudo apt install ./الملف.deb` |
-          | أوبونتو/ديبيان ARM64 | `solan_*_arm64.deb` | `sudo apt install ./الملف.deb` |
-          | فيدورا/ريد هات x64 | `solan-*.x86_64.rpm` | `sudo dnf install ./الملف.rpm` |
-          | فيدورا/ريد هات ARM64 | `solan-*.aarch64.rpm` | `sudo dnf install ./الملف.rpm` |
-          | ماك (Intel + Apple Silicon) | `Solan-*-macos.pkg` | شغّله — يثبّت في `/usr/local/bin` (إن منع الماك: زر يمين ← فتح) |
-          | ماك (بدون تثبيت) | `Solan-*-macos-universal.tar.gz` | فك الضغط وشغّل `solan` |
+          | أوبونتو/ديبيان 64-بت | `solan_*_amd64.deb` | أو بأمر واحد: `curl -fsSL https://raw.githubusercontent.com/kingxsolo/Solan/main/install-release.sh \| sh` |
+          | أوبونتو/ديبيان ARM64 | `solan_*_arm64.deb` | نفس الأمر على خوادم ARM (راسبيري باي 5) |
+          | فيدورا/ريد هات x64 | `solan-*.x86_64.rpm` | نفس أمر التثبيت أعلاه يعمل هنا أيضاً |
+          | فيدورا/ريد هات ARM64 | `solan-*.aarch64.rpm` | نفس أمر التثبيت أعلاه |
+          | ماك (Intel + Apple Silicon) | `Solan-*-macos.pkg` | شغّله — يثبّت في `/usr/local/bin` (إن منع الماك: زر يمين ← فتح)؛ أو بأمر التثبيت أعلاه |
           | ترمكس (أندرويد) | — | `pkg install -y clang git` ثم `git clone https://github.com/kingxsolo/Solan && cd Solan && sh install.sh` (بناء من المصدر داخل ترمكس، دقائق قليلة) |
 
-          **من المصدر على أي منصة**: `sh install.sh` — يكتشف بيئتك ويبني ويثبّت.
-          التفاصيل الكاملة في [README.md](README.md).
-
-          الملفات ذات الأسماء بلا رقم إصدار (مثل `Solan-windows-x64.zip`) نسخ ثابتة
-          تُرفع مع كل إصدار — روابط `releases/latest/download/` تنزّل دائماً الأحدث.
+          **لينكس وماك بأمر واحد** — السكربت يكتشف النظام ومدير الحزم ويثبّت
+          الحزمة الأصلية (deb/rpm) تلقائياً، ويستخرج التنفيذي مباشرة على الأنظمة
+          بلا مدير حزم (ألپاين وغيرها). التفاصيل الكاملة في [README.md](README.md).
 
           - ويندوز 64-بت ولينكس 64-بت ولينكس ARM64 وماك (Intel وApple Silicon): **JIT مفعّل** (حلقات أسرع بعدة مرات)
           - ويندوز 32-بت: مفسَّر كامل الوظائف
