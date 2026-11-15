@@ -18,29 +18,63 @@ static int map_find_name(Dict *d, Str *name) {
 //   NUMV(قناع)       = فحص قناع بسيط
 //   Str              = اسم صنف
 //   [NUMV(0), ب1, ب2...]        = اتحاد: يكفي مطابقة بديل واحد
-//   [NUMV(TY_LIST|TY_MAP), ع1, ع2...] = حاوية: كل العناصر يجب أن تطابق أحد المواصفات
+//   [NUMV(TY_LIST), ع1, ع2...]  = قائمة: كل عنصر يطابق أحد المواصفات
+//   [NUMV(TY_MAP), مفتاح, قيمة] = قاموس: يُفحص نوع المفتاح والقيمة كلٌّ على حدة
 static bool type_ok(Value v, uint16_t mask, List *info);
+static bool iface_method_ok(Value impl, Value req) {
+  if (!IS_T(impl, O_CLO) || !IS_T(req, O_CLO)) return false;
+  Fun *a = AS_CLO(impl)->f, *b = AS_CLO(req)->f;
+  if (a->getter != b->getter || a->kind != b->kind || a->minar > b->minar) return false;
+  if (b->variadic && !a->variadic) return false;
+  return a->variadic || a->arity >= b->arity;
+}
+static bool iface_dict_ok(Dict *impl, Dict *req, bool methods) {
+  for (int i = 0; i < req->n; i++) {
+    if (req->e[i].k.t == V_EMPTY) continue;
+    Value got;
+    if (!dget(impl, req->e[i].k, &got)) return false;
+    if (methods || IS_T(req->e[i].v, O_CLO))
+      if (!iface_method_ok(got, req->e[i].v)) return false;
+  }
+  return true;
+}
+static bool class_implements(Class *c, Class *iface) {
+  if (!iface || !iface->is_iface) return false;
+  for (Class *w = iface; w; w = w->super)
+    if (!iface_dict_ok(&c->methods, &w->methods, true) ||
+        !iface_dict_ok(&c->statics, &w->statics, false)) return false;
+  return true;
+}
+static Class *type_class(Str *name) {
+  if (vm.fcount <= 0) return NULL;
+  Map *globals = vm.frames[vm.fcount - 1].clo->globals;
+  Value v;
+  if (globals && dget(&globals->d, OBJV(name), &v) && IS_T(v, O_CLS)) return AS_CLS(v);
+  return NULL;
+}
+static bool instance_has_type(Instance *in, Str *name) {
+  for (Class *k = in->cls; k; k = k->super) if (k->name == name) return true;
+  Class *want = type_class(name);
+  return want && class_implements(in->cls, want);
+}
 static bool spec_ok(Value v, Value spec, List *info, int depth) {
-  if (depth > 8) return true;
+  if (depth > 8) return false;
   if (IS_NIL(spec)) return true;
   if (IS_NUM(spec)) return type_ok(v, (uint16_t)spec.as.n, info);
-  if (IS_T(spec, O_STR)) { // اسم صنف
-    if (v.t != V_OBJ || v.as.o->t != O_INST) return false;
-    Str *want = AS_STR(spec);
-    for (Class *k = AS_INST(v)->cls; k; k = k->super) if (k->name == want) return true;
-    return false;
+  if (IS_T(spec, O_STR)) { // صنف أو واجهة
+    return IS_T(v, O_INST) && instance_has_type(AS_INST(v), AS_STR(spec));
   }
   if (IS_T(spec, O_LIST)) {
     List *u = AS_LIST(spec);
-    if (u->a.n == 0 || !IS_NUM(u->a.v[0])) return true;
+    if (u->a.n == 0 || !IS_NUM(u->a.v[0])) return false;
     uint16_t h = (uint16_t)u->a.v[0].as.n;
     if (h == 0) { // اتحاد بدائل
-      for (int j = 1; j < u->a.n; j++) if (spec_ok(v, u->a.v[j], info, depth + 1)) return true;
+      for (int j = 1; j < u->a.n; j++)
+        if (spec_ok(v, u->a.v[j], info, depth + 1)) return true;
       return false;
     }
     if (h == TY_LIST || h == TY_MAP) { // حاوية عامة
       if (!type_ok(v, h, info)) return false;
-      if (u->a.n < 2) return true;
       List *l = IS_T(v, O_LIST) ? AS_LIST(v) : NULL;
       Map *mp = IS_T(v, O_MAP) ? AS_MAP(v) : NULL;
       if (h == TY_LIST && l) {
@@ -50,18 +84,18 @@ static bool spec_ok(Value v, Value spec, List *info, int depth) {
           if (!any) return false;
         }
       } else if (h == TY_MAP && mp) {
+        if (u->a.n != 3) return false;
         for (int i = 0; i < mp->d.n; i++) {
           if (mp->d.e[i].k.t == V_EMPTY) continue;
-          bool any = false;
-          for (int j = 1; j < u->a.n; j++) if (spec_ok(mp->d.e[i].v, u->a.v[j], info, depth + 1)) { any = true; break; }
-          if (!any) return false;
+          if (!spec_ok(mp->d.e[i].k, u->a.v[1], info, depth + 1) ||
+              !spec_ok(mp->d.e[i].v, u->a.v[2], info, depth + 1)) return false;
         }
       }
       return true;
     }
-    return true;
+    return false;
   }
-  return true;
+  return false;
 }
 
 static bool type_ok(Value v, uint16_t mask, List *info) {
@@ -80,20 +114,29 @@ static bool type_ok(Value v, uint16_t mask, List *info) {
     case O_CORO: return mask & TY_CORO;
     case O_INST:
       if (mask & TY_CLASSNAME) {
-        for (Class *k = AS_INST(v)->cls; k; k = k->super)
-          for (int i = 2; i < info->a.n; i++) if (IS_OBJ(info->a.v[i]) && (Obj *)k->name == info->a.v[i].as.o) return true;
+        for (int i = 2; i < info->a.n; i++)
+          if (IS_T(info->a.v[i], O_STR) && instance_has_type(AS_INST(v), AS_STR(info->a.v[i]))) return true;
       }
       return mask & TY_INST;
     default: return false;
   }
 }
 
-// فحص يشمل العناصر (يستدعى من OP_CHECK عندما تحمل info مواصفة عميقة في آخر عنصر)
+// فحص القيود العميقة ذات الصلة فقط؛ الأنواع المركبة المتعددة في اتحاد تُعامل كبدائل.
 static bool type_ok_deep(Value v, uint16_t mask, List *info) {
   if (!type_ok(v, mask, info)) return false;
-  if (info->a.n >= 3) {
-    Value last = info->a.v[info->a.n - 1];
-    if (!IS_NIL(last) && !IS_NUM(last) && !IS_T(last, O_STR)) return spec_ok(v, last, info, 0);
+  uint16_t kind = IS_T(v, O_LIST) ? TY_LIST : IS_T(v, O_MAP) ? TY_MAP : 0;
+  if (kind) {
+    bool has = false, any = false;
+    for (int i = 2; i < info->a.n; i++) {
+      Value spec = info->a.v[i];
+      if (!IS_T(spec, O_LIST)) continue;
+      List *u = AS_LIST(spec);
+      if (u->a.n < 1 || !IS_NUM(u->a.v[0]) || (uint16_t)u->a.v[0].as.n != kind) continue;
+      has = true;
+      if (spec_ok(v, spec, info, 0)) { any = true; break; }
+    }
+    return !has || any;
   }
   return true;
 }

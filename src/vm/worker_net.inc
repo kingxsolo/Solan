@@ -37,7 +37,7 @@ static int w_accept_local(int lfd, int tmo_ms) {
   return accept(lfd, NULL, NULL);
 }
 static int w_dial_local(unsigned short port, int tmo_ms) {
-  w_wsa(); // تأكد من تهيئة Winsock في العملية الفرعية
+  os_wsa_child_prepare(); // العملية الفرعية تعيد تهيئة Winsock بعد إنشاء العملية
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) return -1;
   struct sockaddr_in sa; memset(&sa, 0, sizeof sa);

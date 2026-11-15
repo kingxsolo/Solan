@@ -15,6 +15,7 @@ static int run(int base) {
 #define POPL() (*--sp)
 #define PK(n) (sp[-1 - (n)])
 #define RT(...) do { SAVE(); SYNC(); rt_error(__VA_ARGS__); goto throw_exc; } while (0)
+#define RT_TYPE(...) do { SAVE(); SYNC(); rt_type_error(__VA_ARGS__); goto throw_exc; } while (0)
 #define SLOW(call) do { SAVE(); SYNC(); if (call) goto throw_exc; LOAD(); } while (0)
   if (vm.pending_throw) { vm.pending_throw = false; goto throw_exc; }
   NEXT();
@@ -173,7 +174,7 @@ static int run(int base) {
     if (!type_ok_deep(PK(0), mk, inf)) {
       Value bad = PK(0);
       Str *dn = AS_STR(inf->a.v[0]), *cx = AS_STR(inf->a.v[1]);
-      RT("خطأ في النوع: %s يتوقع '%s' لكن وجدت '%s'", cx->chars, dn->chars, type_name(bad));
+      RT_TYPE("خطأ في النوع: %s يتوقع '%s' لكن وجدت '%s'", cx->chars, dn->chars, type_name(bad));
     }
     NEXT();
   }
@@ -386,7 +387,7 @@ static int run(int base) {
     for (int i = 0; i < s->statics.n; i++) if (s->statics.e[i].k.t != V_EMPTY) dset(&sub->statics, s->statics.e[i].k, s->statics.e[i].v);
     sub->super = s; sp--; NEXT();
   }
-  CASE(OP_METHOD) { Str *name = AS_STR(CONSTV()); dset(&AS_CLS(PK(1))->methods, OBJV(name), PK(0)); sp--; NEXT(); }
+  CASE(OP_METHOD) { Str *name = AS_STR(CONSTV()); Class *k = AS_CLS(PK(1)); dset(&k->methods, OBJV(name), PK(0)); sp--; NEXT(); }
   CASE(OP_LIST) {
     int n = READ16(); List *l = new_list();
     if (n > 0) { l->a.v = xalloc(sizeof(Value) * (size_t)n); l->a.cap = n; }

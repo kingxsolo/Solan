@@ -1,4 +1,4 @@
-typedef struct { Str *name; int depth; bool captured, isconst; uint16_t tmask; List *tinfo; int line; bool used; bool warnable; } Local;
+typedef struct { Str *name; int depth; bool captured, isconst; uint16_t tmask; List *tinfo; int line; bool used; bool warnable; bool shadowed; } Local;
 typedef struct { uint8_t index; bool isLocal; } UpvDesc;
 typedef enum { FT_SCRIPT, FT_FUNC, FT_METHOD, FT_INIT } FT;
 typedef struct Loop { struct Loop *enc; int start, depth, tryDepth, nbreaks, finBase; int breaks[256]; } Loop;
@@ -52,13 +52,15 @@ static void init_compiler(Compiler *c, FT type, Str *name) {
 }
 static void emit_check_fwd(void);
 static Fun *end_compiler(void) {
-  // تحذير عن المتغيرات المحلية غير المستخدمة في جسم الدالة نفسه (العمق 0)
+  // تحذير عن المتغيرات المحلية غير المستخدمة الباقية في نطاق جسم الدالة
+  // (جسم الدالة نفسه لا يمر بـend_scope، فكانت هذه التحذيرات لا تظهر أبداً)
   if (g_warn && C->type != FT_SCRIPT) {
     for (int i = 1; i < C->lcount; i++) { // نتجاوز 'هذا'
       Local *l = &C->locals[i];
-      if (!l->name || l->depth < 0) continue;
-      if (l->depth == 0 && l->warnable && !l->used && l->name->chars[0] != '$' && l->name->chars[0] != '_')
-        cwarn("المتغير '%s' مُعرّف لكنه غير مستخدم", l->name->chars);
+      if (!l->name || l->depth < 1 || !l->warnable) continue;
+      if (l->name->chars[0] == '$' || l->name->chars[0] == '_') continue;
+      if (!l->used) cwarn("المتغير '%s' مُعرّف لكنه غير مستخدم", l->name->chars);
+      else if (l->shadowed) cwarn("المتغير '%s' يظلّل اسماً موجوداً في نطاق خارجي", l->name->chars);
     }
   }
   if (C->type == FT_INIT) emit2(OP_GET_LOCAL, 0); else { emit(OP_NIL); emit_check_fwd(); }
@@ -82,6 +84,8 @@ static void end_scope(void) {
       Str *n = l->name;
       if (l->warnable && !l->used && n->chars[0] != '$' && n->chars[0] != '_' && l->depth > 0)
         cwarn("المتغير '%s' مُعرّف لكنه غير مستخدم", n->chars);
+      else if (l->warnable && l->shadowed && n->chars[0] != '$' && n->chars[0] != '_' && l->depth > 0)
+        cwarn("المتغير '%s' يظلّل اسماً موجوداً في نطاق خارجي", n->chars);
     }
   }
   while (C->lcount > 0 && C->locals[C->lcount - 1].depth > C->depth) { emit(C->locals[C->lcount - 1].captured ? OP_CLOSE_UPV : OP_POP); C->lcount--; }
@@ -89,6 +93,9 @@ static void end_scope(void) {
 static int add_local(Str *name, bool init, bool isconst) {
   if (C->lcount == 256) CERR("متغيرات محلية كثيرة جدا");
   Local *l = &C->locals[C->lcount++]; l->name = name; l->depth = init ? C->depth : -1; l->captured = false; l->isconst = isconst; l->tmask = 0; l->tinfo = NULL;
+  // افتراضيًا: غير قابل للتحذير ومُستعمل — كي لا تُحمَّل المعاملات والمتغيرات الداخلية
+  // على قيم عشوائية (كانت warnable/used غير مهيّأتين في المصفوفة)
+  l->line = 0; l->used = true; l->warnable = false; l->shadowed = false;
   if (g_debug_compile) {
     Fun *f = C->fn; if (f->ndbg == f->capdbg) { f->capdbg = f->capdbg ? f->capdbg * 2 : 8; f->dbgname = xrealloc(f->dbgname, sizeof(Str *) * f->capdbg); f->dbgslot = xrealloc(f->dbgslot, sizeof(int) * f->capdbg); }
     f->dbgname[f->ndbg] = name; f->dbgslot[f->ndbg++] = C->lcount - 1;
@@ -179,10 +186,11 @@ static void unary(bool ca) { REC_ENTER(); unary_impl(ca); P.rec--; }
 static void statement(void) { REC_ENTER(); statement_impl(); P.rec--; }
 static void declaration(void) { REC_ENTER(); declaration_impl(); P.rec--; }
 static void function(FT type, Str *name) { REC_ENTER(); function_impl(type, name); P.rec--; }
-// طريقة واجهة بلا جسم: دالة مصغرة (لا معاملات ظاهرة) تعيد عدمًا
-static void function_stub(Str *name) {
+// طريقة واجهة بلا جسم: تحفظ عدد المعاملات الأدنى والأقصى فقط، وتعيد عدمًا عند استدعائها.
+static void function_stub(Str *name, int arity, int minar, bool variadic, bool getter, int kind) {
   Compiler c; init_compiler(&c, FT_METHOD, name); begin_scope();
-  c.fn->getter = false; c.fn->kind = 0;
+  c.fn->getter = getter; c.fn->kind = kind; c.fn->arity = arity; c.fn->minar = minar; c.fn->variadic = variadic;
+  c.fn->ch.n = 0;
   emit(OP_NIL); emit_check_fwd();
   emit(OP_RETURN);
   Fun *fn = end_compiler();
@@ -263,27 +271,33 @@ static void type_atom1(uint16_t *mask, List *info, Buf *disp, Value *spec) {
     *mask |= m;
     advance(); buf_addc(disp, '<');
     List *sl = new_list(); varr_push(&sl->a, NUMV(m)); // sl[0] = نوع الحاوية
-    Buf db; buf_init(&db);
+    Buf db; buf_init(&db); int nargs = 0;
     do {
       // اتحاد ذرات مع '?' اختياري
-      List *alt = new_list(); uint16_t am = 0; Buf ab; buf_init(&ab);
+      List *alt = new_list(); uint16_t am = 0, simple = 0; Buf ab; buf_init(&ab);
       do {
         uint16_t am1 = 0; Value sub;
         type_atom1(&am1, info, &ab, &sub);
         am |= am1;
-        if (!IS_NIL(sub)) varr_push(&alt->a, sub);
-        if (check(T_QUEST)) { advance(); am |= TY_NIL; buf_addc(&ab, '?'); }
+        if (IS_NIL(sub)) simple |= am1;
+        else varr_push(&alt->a, sub);
+        if (check(T_QUEST)) { advance(); am |= TY_NIL; simple |= TY_NIL; buf_addc(&ab, '?'); }
       } while (match(T_BOR) && (buf_fmt(&ab, " | "), true));
       Value es;
-      if (alt->a.n == 0) es = NUMV(am);
+      if (alt->a.n == 0) es = NUMV(simple);
       else {
         List *u = new_list(); varr_push(&u->a, NUMV(0)); // 0 = اتحاد بدائل
+        if (simple) varr_push(&u->a, NUMV(simple));
         for (int i = 0; i < alt->a.n; i++) varr_push(&u->a, alt->a.v[i]);
         es = OBJV(u);
       }
       varr_push(&sl->a, es);
-      buf_add(&db, ab.p ? ab.p : "", ab.n); free(ab.p);
+      if (nargs > 0) buf_addc(&db, ',');
+      buf_add(&db, ab.p ? ab.p : "", ab.n); free(ab.p); nargs++;
     } while (match(T_COMMA));
+    if ((m == TY_LIST && nargs != 1) || (m == TY_MAP && nargs != 2)) {
+      free(db.p); cerror_at(&P.prev, m == TY_LIST ? "قائمة تتطلب نوع عنصر واحدا" : "قاموس يتطلب نوع مفتاح ونوع قيمة");
+    }
     consume_gt();
     buf_add(disp, db.p ? db.p : "", db.n); free(db.p); buf_addc(disp, '>');
     *spec = OBJV(sl);
@@ -307,7 +321,22 @@ static void consume_gt(void) {
 }
 static void type_atom(uint16_t *mask, List *info, Buf *disp) {
   Value sp2; type_atom1(mask, info, disp, &sp2);
-  if (!IS_NIL(sp2)) varr_push(&info->a, sp2); // المواصفة العميقة لفحص العناصر وقت التشغيل
+  if (IS_NIL(sp2)) return;
+  if (IS_T(sp2, O_LIST)) {
+    List *u = AS_LIST(sp2);
+    if (u->a.n > 0 && IS_NUM(u->a.v[0]) && (uint16_t)u->a.v[0].as.n == 0) {
+      // افصل مواصفات الحاويات المتداخلة عن بقية بدائل الاتحاد لتطبيق كل قيودها.
+      List *flat = new_list(); varr_push(&flat->a, NUMV(0));
+      for (int i = 1; i < u->a.n; i++) {
+        Value alt = u->a.v[i];
+        if (IS_T(alt, O_LIST)) varr_push(&info->a, alt);
+        else varr_push(&flat->a, alt);
+      }
+      if (flat->a.n > 1) varr_push(&info->a, OBJV(flat));
+      return;
+    }
+  }
+  varr_push(&info->a, sp2); // المواصفة العميقة لفحص العناصر وقت التشغيل
 }
 static void parse_type(uint16_t *mask, List **info, const char *ctx) {
   List *l = new_list(); Buf disp; buf_init(&disp); uint16_t m = 0;
@@ -629,11 +658,22 @@ static void block(void) {
   consume(T_RC, "توقعت '}'"); end_scope();
 }
 static void declare_local_var(Str *name, bool isconst) {
+  bool shadows = false;
   for (int i = C->lcount - 1; i >= 0; i--) {
     Local *l = &C->locals[i]; if (l->depth != -1 && l->depth < C->depth) break;
     if (l->name == name) CERR("المتغير معرّف مسبقا في هذا النطاق");
   }
+  // تظليل: هل الاسم موجود في نطاق خارجي أو كمتغير عام/مدمج؟
+  for (int i = C->lcount - 1; i >= 0; i--) {
+    Local *l = &C->locals[i];
+    if (l->name == name && l->depth >= 0 && l->depth < C->depth && l->name->chars[0] != '$') { shadows = true; break; }
+  }
+  if (!shadows) {
+    Value tmp;
+    if (dget(&vm.builtins, OBJV(name), &tmp) || dget(&vm.kw, OBJV(name), &tmp)) shadows = true;
+  }
   add_local(name, false, isconst);
+  C->locals[C->lcount - 1].shadowed = shadows;
 }
 static int parse_var_name(bool isconst, Str **out) {
   soft_ident();
@@ -735,23 +775,40 @@ static void class_decl(void) {
     if (isStatic && check(T_EQ)) { advance(); expression(); match(T_SEMI); emit(OP_STATIC); emit16(k); continue; }
     g_getter = isGetter; g_kind = mkind;
     if (iface && !check(T_LC)) {
-      // توقيع بلا جسم في واجهة: `اسم(...)` أو `اسم` — تُجمَّع كطريقة بجسم يرمي خطأ
-      // الاسم مُستهلك بالفعل في P.prev (سطر advance أعلاه)
+      // قراءة التوقيع تحفظ arity/minar/variadic، مع تخطي أنواع المعاملات والعودة.
       Str *imn = P.prev.s; int ik = make_const(OBJV(imn));
-      // استهلك التوقيع: (وسائط اختيارية مع أنواع وقيم افتراضية)
-      if (check(T_LP)) { advance(); int pd = 1;
-        while (pd > 0 && !check(T_EOF)) {
-          if (check(T_LP)) pd++;
-          else if (check(T_RP)) pd--;
-          if (pd > 0) advance();
-        }
-        if (!check(T_RP)) cerror_at(&P.cur, "توقعت ')' بعد وسائط الطريقة");
-        advance(); // استهلك ')'
+      int arity = 0, minar = 0; bool variadic = false, has_default = false;
+      if (check(T_LP)) {
+        advance();
+        if (!check(T_RP)) do {
+          if (check(T_ELLIPSIS)) { advance(); variadic = true; }
+          if (P.cur.t != T_IDENT || !P.cur.s) cerror_at(&P.cur, "توقعت اسم معامل في توقيع الواجهة");
+          advance(); arity++;
+          if (match(T_COLON)) { uint16_t tm; List *ti; Buf td; buf_init(&td); parse_type(&tm, &ti, "معامل واجهة"); free(td.p); }
+          if (match(T_EQ)) {
+            if (variadic) CERR("لا يمكن للمعامل المتبقي قيمة افتراضية");
+            has_default = true;
+            int pd = 0, bd = 0, cd = 0;
+            while (!check(T_EOF)) {
+              if (pd == 0 && bd == 0 && cd == 0 && (check(T_COMMA) || check(T_RP))) break;
+              if (check(T_LP)) pd++; else if (check(T_RP)) { if (pd == 0) break; pd--; }
+              else if (check(T_LB)) bd++; else if (check(T_RB) && bd > 0) bd--;
+              else if (check(T_LC)) cd++; else if (check(T_RC) && cd > 0) cd--;
+              advance();
+            }
+          } else {
+            if (has_default && !variadic) CERR("المعاملات ذات القيمة الافتراضية يجب أن تكون أخيرة");
+            minar++;
+          }
+          if (variadic && !check(T_RP)) CERR("المعامل المتبقي يجب أن يكون الأخير");
+        } while (match(T_COMMA));
+        consume(T_RP, "توقعت ')' بعد وسائط الطريقة");
       }
+      if (match(T_COLON)) { uint16_t rm; List *ri; Buf rd; buf_init(&rd); parse_type(&rm, &ri, "قيمة الإرجاع من الواجهة"); free(rd.p); }
+      if (minar > arity) CERR("توقيع واجهة غير صالح");
       match(T_SEMI);
-      // دالة مصغرة بجسم فارغ (تعيد عدم)
-      function_stub(imn);
-      emit(OP_METHOD); emit16(ik);
+      function_stub(imn, arity, minar, variadic, isGetter, mkind);
+      emit(isStatic ? OP_STATIC : OP_METHOD); emit16(ik);
       continue;
     }
     function(isStatic ? FT_FUNC : (mn == vm.init_str ? FT_INIT : FT_METHOD), mn);

@@ -72,7 +72,7 @@ jobs:
       - name: استخراج رقم الإصدار
         shell: pwsh
         run: |
-          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.3.5' }
+          if ("$env:GITHUB_REF_NAME" -match '^v(.+)$') { $ver = $Matches[1] } else { $ver = '1.4.0' }
           "VER=$ver" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "VER=$ver"
 
@@ -82,6 +82,7 @@ jobs:
         run: |
           gcc -O2 -Wno-format-truncation \
               -D_WIN32_WINNT=0x0A00 \
+              -DSOLAN_VERSION=\"${VER}\" \
               -o solan.exe solan.c \
               -lws2_32 -lshell32 -ladvapi32 -lm
 
@@ -94,6 +95,7 @@ jobs:
           $gcc = (Get-ChildItem C:\llvm-mingw\bin\aarch64-w64-mingw32-gcc.* | Select-Object -First 1).FullName
           & $gcc -O2 -Wno-format-truncation `
               -D_WIN32_WINNT=0x0A00 `
+              "-DSOLAN_VERSION=`"$env:VER`"" `
               -o solan.exe solan.c `
               -lws2_32 -lshell32 -ladvapi32 -lm
           if ($LASTEXITCODE -ne 0) { throw 'فشل البناء المتقاطع ARM64' }
@@ -109,10 +111,12 @@ jobs:
           if ($size -lt 100KB) { throw "حجم الثنائي مشبوه: $size بايت" }
           Write-Host "solan.exe ARM64 جاهز ($([Math]::Round($size/1KB)) KB)"
 
-      - name: الاختبارات (22)
+      - name: الاختبارات (50)
         if: matrix.arch != 'arm64'
         shell: msys2 {0}
-        run: ./solan.exe pc/اختبار_ويندوز.سو
+        run: |
+          ./solan.exe pc/اختبار_ويندوز.سو
+          ./solan.exe pc/اختبار_شبكة_عمال.سو
 
       - name: اختبار JIT (حلقات ساخنة + تحقق نتائج)
         if: matrix.arch != 'arm64'
@@ -160,17 +164,20 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.5" ;;
+            *)  VER="1.4.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
       - name: بناء ثابت
         run: |
           musl-gcc -O2 -Wno-format-truncation -static \
+              -DSOLAN_VERSION=\"${VER}\" \
               -o solan solan.c -lm
 
-      - name: الاختبارات (22)
-        run: ./solan pc/اختبار_ويندوز.سو
+      - name: الاختبارات (50)
+        run: |
+          ./solan pc/اختبار_ويندوز.سو
+          ./solan pc/اختبار_شبكة_عمال.سو
 
       - name: اختبار JIT (حلقات ساخنة + تحقق نتائج)
         run: ./solan pc/اختبار_JIT.سو
@@ -209,17 +216,20 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.5" ;;
+            *)  VER="1.4.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
       - name: بناء ثابت لـARM64
         run: |
           aarch64-linux-gnu-gcc -O2 -Wno-format-truncation -static \
+              -DSOLAN_VERSION=\"${VER}\" \
               -o solan-arm64 solan.c -lm
 
-      - name: الاختبارات (22) — تنفيذ ARM64 حقيقي عبر QEMU
-        run: qemu-aarch64-static ./solan-arm64 pc/اختبار_ويندوز.سو
+      - name: الاختبارات (50) — تنفيذ ARM64 حقيقي عبر QEMU
+        run: |
+          qemu-aarch64-static ./solan-arm64 pc/اختبار_ويندوز.سو
+          qemu-aarch64-static ./solan-arm64 pc/اختبار_شبكة_عمال.سو
 
       - name: اختبار JIT (حلقات ساخنة + تحقق نتائج)
         run: qemu-aarch64-static ./solan-arm64 pc/اختبار_JIT.سو
@@ -347,7 +357,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in
             v*) VER="${GITHUB_REF_NAME#v}" ;;
-            *)  VER="1.3.5" ;;
+            *)  VER="1.4.0" ;;
           esac
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -355,16 +365,20 @@ jobs:
         run: |
           clang -O2 -Wno-format-truncation \
               -arch x86_64 -mmacosx-version-min=11.0 \
+              -DSOLAN_VERSION=\"${VER}\" \
               -o solan-intel solan.c -lm
           clang -O2 -Wno-format-truncation \
               -arch arm64 -mmacosx-version-min=11.0 \
+              -DSOLAN_VERSION=\"${VER}\" \
               -o solan-arm64 solan.c -lm
           lipo -create solan-intel solan-arm64 -o solan
           file solan
           lipo -info solan
 
-      - name: الاختبارات (22) — Apple Silicon الأصلي
-        run: ./solan pc/اختبار_ويندوز.سو
+      - name: الاختبارات (50) — Apple Silicon الأصلي
+        run: |
+          ./solan pc/اختبار_ويندوز.سو
+          ./solan pc/اختبار_شبكة_عمال.سو
 
       - name: اختبار JIT — Apple Silicon الأصلي (شريحة arm64 مع JIT مفعّل)
         run: ./solan pc/اختبار_JIT.سو
@@ -372,10 +386,11 @@ jobs:
       - name: إثبات تجميع ARM64 (تتبع)
         run: SOLAN_JIT_TRACE=1 ./solan pc/اختبار_JIT.سو 2>&1 | grep "جُمّعت حلقة"
 
-      - name: الاختبارات (22) — شريحة Intel مع JIT عبر Rosetta
+      - name: الاختبارات (50) — شريحة Intel مع JIT عبر Rosetta
         run: |
           if [ -d /Library/Apple/usr/libexec/oah ]; then
             arch -x86_64 ./solan pc/اختبار_ويندوز.سو
+            arch -x86_64 ./solan pc/اختبار_شبكة_عمال.سو
             arch -x86_64 ./solan pc/اختبار_JIT.سو
           else
             echo "Rosetta غير متوفرة على هذا العدّاء — تخطي اختبار شريحة Intel"

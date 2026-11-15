@@ -80,8 +80,10 @@ NAT(n_assert) {
 NAT(n_chr) { NUMA(0); char t[4]; *res = mkstr(t, u8_encode((uint32_t)a[0].as.n, t)); return true; }
 NAT(n_ord) { STRA(0); if (AS_STR(a[0])->len == 0) { *res = NIL; return true; } uint32_t cp; u8_decode((const unsigned char *)AS_STR(a[0])->chars, &cp); *res = NUMV(cp); return true; }
 NAT(n_isa) {
-  *res = BOOLV(false); if (!IS_T(a[0], O_INST) || !IS_T(a[1], O_CLS)) return true;
-  for (Class *c = AS_INST(a[0])->cls; c; c = c->super) if (c == AS_CLS(a[1])) { *res = BOOLV(true); break; }
+  *res = BOOLV(false); if ((!IS_T(a[0], O_INST) && !IS_T(a[0], O_CLS)) || !IS_T(a[1], O_CLS)) return true;
+  Class *actual = IS_T(a[0], O_INST) ? AS_INST(a[0])->cls : AS_CLS(a[0]), *want = AS_CLS(a[1]);
+  for (Class *c = actual; c; c = c->super) if (c == want) { *res = BOOLV(true); return true; }
+  *res = BOOLV(class_implements(actual, want));
   return true;
 }
 NAT(n_is_str) { *res = BOOLV(IS_T(a[0], O_STR)); return true; }
@@ -109,19 +111,11 @@ NAT(n_gcthresh) { // حد_القمامة(ن؟): قراءة/ضبط عتبة بد�
   *res = NUMV((double)vm.next_gc);
   return true;
 }
-NAT(n_implements) { // يطبق(كائن, واجهة): فحص أن الكائن (أو صنفه) يملك كل طرق الواجهة
+NAT(n_implements) { // يطبق(كائن, واجهة): يفحص أسماء الطرق وتواقيعها
   *res = BOOLV(false);
-  if (IS_T(a[1], O_CLS) && AS_CLS(a[1])->is_iface) {
-    if (!IS_T(a[0], O_INST) && !IS_T(a[0], O_CLS)) return true;
+  if (IS_T(a[1], O_CLS) && AS_CLS(a[1])->is_iface && (IS_T(a[0], O_INST) || IS_T(a[0], O_CLS))) {
     Class *c = IS_T(a[0], O_INST) ? AS_INST(a[0])->cls : AS_CLS(a[0]);
-    for (Class *w = AS_CLS(a[1]); w; w = w->super) {
-      for (int i = 0; i < w->methods.n; i++) {
-        if (w->methods.e[i].k.t != V_OBJ || w->methods.e[i].k.as.o->t != O_STR) continue;
-        Value m;
-        if (!dget(&c->methods, w->methods.e[i].k, &m)) return true; // طريقة ناقصة
-      }
-    }
-    *res = BOOLV(true);
+    *res = BOOLV(class_implements(c, AS_CLS(a[1])));
   }
   return true;
 }

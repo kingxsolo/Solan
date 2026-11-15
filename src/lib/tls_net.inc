@@ -79,6 +79,7 @@ static int rb_exact(int fd, int n, Buf *out) {
 }
 static int tcp_connect(const char *host, int port, int tmo, char *err, int es) {
   if (!host_allowed(host)) { snprintf(err, es, "الصلاحية غير ممنوحة: شبكة (المضيف %s)", host); return -1; }
+  os_net_prepare();
   struct addrinfo hints; memset(&hints, 0, sizeof hints); hints.ai_socktype = SOCK_STREAM; struct addrinfo *res, *ai; char ps[16]; snprintf(ps, sizeof ps, "%d", port);
   int g = getaddrinfo(host, ps, &hints, &res);
   if (g) { snprintf(err, es, "تعذّر حل العنوان '%s': %s", host, gai_strerror(g)); return -1; }
@@ -308,7 +309,7 @@ NAT(sk_wait) {
   return true;
 }
 NAT(sk_resolve) {
-  STRA(0); struct addrinfo h, *r; memset(&h, 0, sizeof h); h.ai_socktype = SOCK_STREAM; h.ai_family = AF_INET;
+  STRA(0); os_net_prepare(); struct addrinfo h, *r; memset(&h, 0, sizeof h); h.ai_socktype = SOCK_STREAM; h.ai_family = AF_INET;
   if (getaddrinfo(AS_STR(a[0])->chars, NULL, &h, &r)) FAIL("تعذّر حل العنوان"); char ip[64]; inet_ntop(AF_INET, &((struct sockaddr_in *)r->ai_addr)->sin_addr, ip, sizeof ip);
   freeaddrinfo(r); *res = mkstr(ip, (int)strlen(ip)); return true;
 }
@@ -324,7 +325,7 @@ NAT(sk_udp) {
 NAT(sk_sendto) {
   FDA(0, fd); STRA(1); NUMA(2); Str *s = tostr(a[3]); struct sockaddr_in sa; memset(&sa, 0, sizeof sa); sa.sin_family = AF_INET; sa.sin_port = htons((uint16_t)a[2].as.n);
   if (inet_pton(AF_INET, AS_STR(a[1])->chars, &sa.sin_addr) != 1) {
-    struct addrinfo h, *r; memset(&h, 0, sizeof h); h.ai_family = AF_INET; if (getaddrinfo(AS_STR(a[1])->chars, NULL, &h, &r)) FAIL("تعذّر حل العنوان");
+    struct addrinfo h, *r; os_net_prepare(); memset(&h, 0, sizeof h); h.ai_family = AF_INET; if (getaddrinfo(AS_STR(a[1])->chars, NULL, &h, &r)) FAIL("تعذّر حل العنوان");
     sa.sin_addr = ((struct sockaddr_in *)r->ai_addr)->sin_addr; freeaddrinfo(r);
   }
   ssize_t w = sendto(fd, s->chars, s->len, 0, (struct sockaddr *)&sa, sizeof sa);

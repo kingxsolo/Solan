@@ -20,7 +20,7 @@ $ErrorActionPreference = "Continue"   # ملاحظة: أخطاء المترجم�
 Set-Location (Join-Path $PSScriptRoot "..")
 $rootTools = Join-Path (Split-Path $PSScriptRoot) "tools"
 
-$VER = "1.3.2"
+$VER = "1.4.0"
 $fv = ($VER -split '\.')
 while ($fv.Count -lt 4) { $fv += "0" }
 $OUT = "dist"
@@ -168,6 +168,12 @@ Write-Host "✓ الناتج: $exe ($size MB)" -ForegroundColor Green
 if ($LASTEXITCODE -ne 0) { throw "الملف التنفيذي لا يعمل" }
 & $exe pc\هلا.سو
 if ($LASTEXITCODE -ne 0) { throw "فشل تنفيذ برنامج تجريبي" }
+& $exe pc\اختبار_ويندوز.سو
+if ($LASTEXITCODE -ne 0) { throw "فشلت اختبارات ويندوز" }
+& $exe pc\اختبار_شبكة_عمال.سو
+if ($LASTEXITCODE -ne 0) { throw "فشل اختبار TCP loopback والعمال المتوازية" }
+& $exe pc\اختبار_JIT.سو
+if ($LASTEXITCODE -ne 0) { throw "فشلت اختبارات JIT" }
 
 # ---------- 5) المُثبِّت ----------
 if ($Installer) {

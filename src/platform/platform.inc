@@ -64,6 +64,8 @@ static const char *os_tmpdir(void) { const char *t = getenv("TMPDIR"); return t 
 static int os_mkstemp(char *tmpl) { return mkstemp(tmpl); }
 static void os_console_init(void) {}
 static void os_ignore_sigpipe(void) { signal(SIGPIPE, SIG_IGN); }
+static void os_net_prepare(void) {}
+static void os_wsa_child_prepare(void) {}
 #define solan_strptime strptime
 static void os_args_utf8(int *argc, char ***argv) { (void)argc; (void)argv; }
 static void os_set_memlimit(long mb) {
@@ -390,8 +392,15 @@ static void *dlsym(void *h, const char *s) { if (!h) h = (void *)GetModuleHandle
 static int dlclose(void *h) { return !FreeLibrary((HMODULE)h); }
 static const char *dlerror(void) { return "LoadLibrary failed"; }
 
-static SOCKET w_tab[MAXFD]; static unsigned char w_nb[MAXFD]; static int w_wsa_done;
-static void w_wsa(void) { if (!w_wsa_done) { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); w_wsa_done = 1; } }
+static SOCKET w_tab[MAXFD]; static unsigned char w_nb[MAXFD]; static volatile LONG w_wsa_state;
+static void w_wsa(void) {
+  if (InterlockedCompareExchange(&w_wsa_state, 0, 0) == 2) return;
+  if (InterlockedCompareExchange(&w_wsa_state, 1, 0) == 0) {
+    WSADATA d; LONG state = WSAStartup(MAKEWORD(2, 2), &d) == 0 ? 2 : 0;
+    InterlockedExchange(&w_wsa_state, state); return;
+  }
+  while (InterlockedCompareExchange(&w_wsa_state, 0, 0) == 1) Sleep(0);
+}
 static int w_reg(SOCKET s) {
   if (s == INVALID_SOCKET) return -1;
   for (int i = 3; i < MAXFD; i++) if (!w_tab[i]) { w_tab[i] = s; w_nb[i] = 0; return i; }
@@ -437,7 +446,7 @@ static int w_fcntl(int fd, int cmd, ...) {
   return -1;
 }
 static int w_poll(struct pollfd *p, unsigned n, int t) {
-  w_wsa(); SOCKET *sv = (SOCKET *)malloc((n + 1) * sizeof(SOCKET)); int valid = 0;
+  SOCKET *sv = (SOCKET *)malloc((n + 1) * sizeof(SOCKET)); int valid = 0;
   for (unsigned i = 0; i < n; i++) { sv[i] = (SOCKET)p[i].fd; SOCKET s = (p[i].fd != INVALID_SOCKET) ? w_s((int)p[i].fd) : INVALID_SOCKET; p[i].fd = s; if (s != INVALID_SOCKET) valid++; p[i].revents = 0; }
   int r;
   if (!valid) { if (t > 0) Sleep((DWORD)t); else if (t < 0) Sleep(INFINITE); r = 0; }
@@ -470,6 +479,7 @@ static ssize_t w_recvfrom(int fd, void *b, size_t n, int f, struct sockaddr *a, 
 #define write(f, b, n) w_write(f, b, n)
 #define fcntl w_fcntl
 #define poll(p, n, t) w_poll(p, n, t)
+static void os_wsa_child_prepare(void) { w_wsa(); }
 
 static int kill(int pid, int sig) { (void)sig; HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid); if (!h) return -1; BOOL ok = TerminateProcess(h, 1); CloseHandle(h); return ok ? 0 : -1; }
 
@@ -496,7 +506,9 @@ static int os_mkstemp(char *tmpl) {
 }
 static void os_ignore_sigpipe(void) {}
 
-static void os_early_wsa(void) { w_wsa(); }
+// تهيئة winsock كسولة: تُستدعى فقط عند أول عملية شبكة حقيقية.
+// (كانت تُستدعى في كل تشغيل فيخسر كل سكربت لا يستخدم الشبكة 1-5 مللي ثانية)
+static void os_net_prepare(void) { w_wsa(); }
 
 #define mallopt(a, b) ((void)(a), (void)(b))
 #ifndef M_MMAP_THRESHOLD
@@ -510,10 +522,14 @@ static void os_heap_tune(void) {
   HeapSetInformation(GetProcessHeap(), HeapCompatibilityInformation, &info, sizeof info);
 }
 static void os_console_init(void) {
-  SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8);
+  // الأوضاع الثنائية ضرورية دائماً (وإلا يُحوَّل \n إلى \r\n فيفسد المخرجات)
   _setmode(_fileno(stdout), _O_BINARY); _setmode(_fileno(stderr), _O_BINARY);
-  DWORD m; HANDLE h[2] = {GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE)};
-  for (int i = 0; i < 2; i++) if (h[i] != INVALID_HANDLE_VALUE && GetConsoleMode(h[i], &m)) SetConsoleMode(h[i], m | 0x0004  );
+  // ضبط ترميز الكونسول مكلف (استعلامات سجل) — لا نفعله إلا إذا كانت المخرجات موجّهة فعلاً لطرفية.
+  if (_isatty(_fileno(stdout)) || _isatty(_fileno(stderr))) {
+    SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8);
+    DWORD m; HANDLE h[2] = {GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE)};
+    for (int i = 0; i < 2; i++) if (h[i] != INVALID_HANDLE_VALUE && GetConsoleMode(h[i], &m)) SetConsoleMode(h[i], m | 0x0004);
+  }
   if (!getenv("HOME")) { const char *u = getenv("USERPROFILE"); if (u) _putenv_s("HOME", u); }
 }
 static void os_args_utf8(int *argc, char ***argv) {

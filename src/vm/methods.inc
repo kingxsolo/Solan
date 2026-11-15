@@ -170,11 +170,13 @@ static int str_method(Str *s, int mid, Str *nm, int argc, Value *a, Value *res) 
     case M_INDICES: {
       NEED(1); Str *t = tostr(a[0]); List *out = new_list(); *res = OBJV(out);
       if (t->len > 0) {
-        const char *p = s->chars, *end = p + s->len;
+        const char *p = s->chars, *end = p + s->len; int chars = 0;
         for (;;) {
           const char *f = memmem(p, end - p, t->chars, t->len);
           if (!f) break;
-          varr_push(&out->a, NUMV(u8_len(s->chars, (int)(f - s->chars))));
+          int before = u8_len(p, (int)(f - p));
+          varr_push(&out->a, NUMV(chars + before));
+          chars += before + u8_len(f, t->len);
           p = f + t->len;
         }
       }
@@ -403,22 +405,48 @@ static int list_method(List *l, int mid, Str *nm, int argc, Value *a, Value *res
     }
     case M_SORTBY: {
       NEED(1); int n = l->a.n; if (n < 2) { *res = OBJV(l); return 0; }
-      Value *keys = xalloc(sizeof(Value) * n);
-      for (int i = 0; i < n; i++) { Value x = l->a.v[i]; if (!call_fn(a[0], 1, &x, &keys[i])) { free(keys); return 1; } }
-      // فرز إدراجي مستقر يرتب المؤشرات حسب المفاتيح
-      int *idx = xalloc(sizeof(int) * n);
-      for (int i = 0; i < n; i++) idx[i] = i;
-      Value *kv = xalloc(sizeof(Value) * n);
-      memcpy(kv, keys, sizeof(Value) * n);
-      for (int i = 1; i < n; i++) {
-        int ti = idx[i]; Value tk = kv[i]; int j = i - 1;
-        while (j >= 0) { int c; if (!cmp_vals(kv[j], tk, NIL, &c)) { free(keys); free(idx); free(kv); return 1; } if (c > 0) { idx[j + 1] = idx[j]; kv[j + 1] = kv[j]; j--; } else break; }
-        idx[j + 1] = ti; kv[j + 1] = tk;
+      // Snapshots remain rooted while key/comparator callbacks may allocate or mutate the receiver.
+      List *values = new_list(); push(OBJV(values));
+      List *keyroot = new_list(); push(OBJV(keyroot));
+      for (int i = 0; i < n; i++) varr_push(&values->a, l->a.v[i]);
+      for (int i = 0; i < n; i++) {
+        Value x = values->a.v[i], key;
+        if (!call_fn(a[0], 1, &x, &key)) { vm.sp -= 2; return 1; }
+        varr_push(&keyroot->a, key);
       }
-      Value *nv = xalloc(sizeof(Value) * n);
-      for (int i = 0; i < n; i++) nv[i] = l->a.v[idx[i]];
-      memcpy(l->a.v, nv, sizeof(Value) * n);
-      free(keys); free(idx); free(kv); free(nv);
+      // فرز دمجي مستقر بوقت O(n log n)، مع إبقاء المفاتيح محسوبة مرة واحدة لكل عنصر.
+      typedef struct { int i; Value key; } SortByItem;
+      SortByItem *items = xalloc(sizeof(SortByItem) * n), *work = xalloc(sizeof(SortByItem) * n);
+      for (int i = 0; i < n; i++) { items[i].i = i; items[i].key = keyroot->a.v[i]; }
+      bool ok = true;
+      for (int w = 1; w < n;) {
+        for (int lo = 0; lo < n;) {
+          int mid = w < n - lo ? lo + w : n;
+          int hi = w < n - mid ? mid + w : n;
+          int i = lo, j = mid, k = lo;
+          while (i < mid && j < hi) {
+            int c; if (!cmp_vals(items[i].key, items[j].key, NIL, &c)) { ok = false; break; }
+            work[k++] = c <= 0 ? items[i++] : items[j++];
+          }
+          while (ok && i < mid) work[k++] = items[i++];
+          while (ok && j < hi) work[k++] = items[j++];
+          if (!ok) break;
+          lo = hi;
+        }
+        if (!ok) break;
+        SortByItem *swap = items; items = work; work = swap;
+        if (w > n / 2) break;
+        w *= 2;
+      }
+      if (ok) {
+        Value *nv = xalloc(sizeof(Value) * n);
+        for (int i = 0; i < n; i++) nv[i] = values->a.v[items[i].i];
+        if (l->a.n != n) { rt_error("تغير طول القائمة أثناء رتب_حسب"); ok = false; }
+        else memcpy(l->a.v, nv, sizeof(Value) * n);
+        free(nv);
+      }
+      free(items); free(work); vm.sp -= 2;
+      if (!ok) return 1;
       *res = OBJV(l); return 0;
     }
     case M_TAKEWHILE: case M_DROPWHILE: {

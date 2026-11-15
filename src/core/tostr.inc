@@ -54,14 +54,14 @@ static int cur_line(void) {
   return off >= 0 ? f->clo->f->ch.lines[off] : 0;
 }
 
-static void rt_error(const char *fmt, ...) {
-  char msg[600]; va_list ap; va_start(ap, fmt); vsnprintf(msg, sizeof msg, fmt, ap); va_end(ap);
+static void rt_error_v(const char *kind, const char *fmt, va_list ap) {
+  char msg[600]; vsnprintf(msg, sizeof msg, fmt, ap);
   char full[700]; int ln = cur_line();
   if (ln > 0) snprintf(full, sizeof full, "%s (سطر %d)", msg, ln); else snprintf(full, sizeof full, "%s", msg);
   // خطأ منظم: كائن من صنف 'خطأ' مع رسالة/نوع/سطر/ملف — مع توافق خلفي (النص يعمل)
   if (vm.err_cls) {
     Instance *e = new_instance(vm.err_cls);
-    Str *msg_s = intern_c(full); Str *kind_s = intern_c("تشغيل");
+    Str *msg_s = intern_c(full); Str *kind_s = intern_c(kind);
     dset(&e->fields, OBJV(vm.s_msg), OBJV(msg_s));
     dset(&e->fields, OBJV(vm.s_kind), OBJV(kind_s));
     dset(&e->fields, OBJV(vm.s_line), NUMV(ln));
@@ -72,6 +72,12 @@ static void rt_error(const char *fmt, ...) {
     return;
   }
   vm.exc = OBJV(intern_c(full));
+}
+static void rt_error(const char *fmt, ...) {
+  va_list ap; va_start(ap, fmt); rt_error_v("تشغيل", fmt, ap); va_end(ap);
+}
+static void rt_type_error(const char *fmt, ...) {
+  va_list ap; va_start(ap, fmt); rt_error_v("نوع", fmt, ap); va_end(ap);
 }
 #define FAIL(...) do { rt_error(__VA_ARGS__); return false; } while (0)
 static void capture_trace(void) {
